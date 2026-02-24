@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     BOT_TOKEN: str 
     WEBHOOK_URL: str = ""
     BASE_URL: str = ""
+    PLAYER_URL: str = ""
     ADMIN_IDS: str = ""
     
     COOKIES_CONTENT: str = ""
