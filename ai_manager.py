@@ -10,13 +10,13 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (Умный гибрид: Flash для логики, Gemma 3 для общения).
+    🧠 AI Manager (Optimized for Gemma 3 - 14,400 RPD Limits).
     """
     def __init__(self, settings: Settings):
         self.settings = settings
         self.providers = []
         
-        # ⚠️ АГРЕССИВНЫЙ ПОИСК КЛЮЧЕЙ (Берем из переменных Railway напрямую!)
+        # Захват ключей
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
         openrouter_key = os.getenv("OPENROUTER_API_KEY") or getattr(self.settings, 'OPENROUTER_API_KEY', '')
         
@@ -27,8 +27,8 @@ class AIManager:
         if gemini_key:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
-                self.providers.append("Gemini")
-                logger.info("✅ ИИ успешно подключен (Ключ найден!)")
+                self.providers.append("GoogleAI")
+                logger.info("✅ ИИ успешно подключен (Лимиты Gemma 3: 14.4K RPD)")
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения ИИ: {e}")
                 
@@ -49,30 +49,36 @@ class AIManager:
         {{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
         """
 
-        if "Gemini" in self.providers:
-            res = await self._call_gemini_for_json(prompt)
+        # 1. Сначала бьем в Gemma 3 (у нас есть 14 400 запросов!)
+        if "GoogleAI" in self.providers:
+            res = await self._call_gemma_for_json(prompt)
             if res: return res
 
+        # 2. Если не вышло - OpenRouter
         if "OpenRouter" in self.providers:
             res = await self._call_openrouter_for_json(prompt)
             if res: return res
             
         return self._regex_fallback(text)
 
-    async def _call_gemini_for_json(self, prompt: str) -> Optional[dict]:
+    async def _call_gemma_for_json(self, prompt: str) -> Optional[dict]:
         try:
-            # Для генерации JSON используем Flash (он лучше следует синтаксису)
+            # 🚀 Используем Gemma 3 27B для JSON-маршрутизации
             response = self.gemini_client.models.generate_content(
-                model="gemini-2.0-flash", 
+                model="gemma-3-27b-it", 
                 contents=prompt
             )
             return self._parse_json(response.text)
         except Exception as e:
-            logger.error(f"❌ AI API error (JSON): {e}")
-            return None
+            logger.error(f"❌ Gemma API error (JSON): {e}")
+            # Резерв на Gemini 2.5 Flash, если Gemma вдруг упадет (Тратим 1 из 20 запросов)
+            try:
+                fallback = self.gemini_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+                return self._parse_json(fallback.text)
+            except: return None
 
     async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
-        free_models = ["google/gemma-3-27b-it:free", "google/gemini-2.0-flash-exp:free"]
+        free_models = ["google/gemma-3-27b-it:free", "google/gemini-2.5-flash:free"]
         headers = {
             "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
@@ -104,21 +110,21 @@ class AIManager:
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        # 1. ОСНОВНОЙ ИИ - GEMMA 3 (С огромными лимитами)
-        if "Gemini" in self.providers:
+        # 1. ОСНОВНОЙ ИИ - GEMMA 3 27B
+        if "GoogleAI" in self.providers:
             try:
                 full_prompt = f"{system_prompt}\n\nUser: {prompt}"
                 response = self.gemini_client.models.generate_content(
-                    model="gemma-3-27b-it", # 🔥 ВОТ ОНА, GEMMA 3!
+                    model="gemma-3-27b-it", # 🔥 Топовая модель из твоей таблицы
                     contents=full_prompt
                 )
-                logger.info("💬 Gemma 3 (Chat) responded.")
+                logger.info("💬 Gemma 3 27B (Chat) responded.")
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Gemma 3 chat failed (trying fallback): {e}")
-                # Если Google обновит названия моделей, падаем на Flash
+                # Резерв на 2.5 Flash
                 try:
-                    response = self.gemini_client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
+                    response = self.gemini_client.models.generate_content(model="gemini-2.5-flash", contents=full_prompt)
                     return response.text
                 except: pass
                 
