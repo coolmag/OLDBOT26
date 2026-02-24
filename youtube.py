@@ -131,6 +131,7 @@ class YouTubeDownloader:
             'format': 'bestaudio/best',
             'outtmpl': temp_path_str,
             'quiet': True,
+            'progress': False,
             'nocheckcertificate': True,
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
         }
@@ -147,7 +148,7 @@ class YouTubeDownloader:
             if final_temp_path:
                 if target_path.exists(): target_path.unlink()
                 final_temp_path.rename(target_path)
-                logger.success(f"✅ Direct yt-dlp download successful for {video_id}")
+                logger.info(f"✅ Direct yt-dlp download successful for {video_id}")
                 return DownloadResult(success=True, file_path=target_path, track_info=track_info, is_url=False)
         except Exception as e:
             logger.warning(f"❌ Direct yt-dlp download failed for {video_id}: {e}")
@@ -162,6 +163,7 @@ class YouTubeDownloader:
             'format': 'bestaudio/best',
             'outtmpl': temp_path_str,
             'quiet': True,
+            'progress': False,
             'nocheckcertificate': True,
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
             'default_search': 'scsearch1:',
@@ -175,7 +177,7 @@ class YouTubeDownloader:
             if final_temp_path:
                 if target_path.exists(): target_path.unlink()
                 final_temp_path.rename(target_path)
-                logger.success(f"✅ SoundCloud fallback successful for: {query}")
+                logger.info(f"✅ SoundCloud fallback successful for: {query}")
                 updated_track_info = track_info.copy(update={'source': Source.SOUNDCLOUD})
                 return DownloadResult(success=True, file_path=target_path, track_info=updated_track_info, is_url=False)
         except Exception as e:

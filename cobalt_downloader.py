@@ -70,6 +70,6 @@ class CobaltDownloader:
                     logger.error(f"An unexpected error occurred with Cobalt instance {instance}: {e}", exc_info=True)
                     continue
 
-        logger.error("All Cobalt instances failed for URL: {youtube_url}")
+        logger.error(f"All Cobalt instances failed for URL: {youtube_url}")
         return None
 
