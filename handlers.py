@@ -54,8 +54,20 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
         if dl_res.success and dl_res.file_path:
             try:
                 info = dl_res.track_info
+                # 🎛 ФОРМИРУЕМ КНОПКУ ПЛЕЕРА ДЛЯ /PLAY
+                settings = context.application.settings
+                player_url = getattr(settings, 'PLAYER_URL', getattr(settings, 'BASE_URL', ''))
+                markup = None
+                if player_url:
+                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]])
+
                 with open(dl_res.file_path, 'rb') as f:
-                    await context.bot.send_audio(chat_id=chat_id, audio=f, title=info.title, performer=info.artist, duration=info.duration, thumbnail=info.thumbnail_url)
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f, 
+                        title=info.title, performer=info.artist, duration=info.duration, 
+                        thumbnail=info.thumbnail_url,
+                        reply_markup=markup # Отправляем кнопку вместе с треком
+                    )
             except Exception as e:
                 logger.error(f"Error sending audio: {e}", exc_info=True)
         else:
@@ -138,14 +150,27 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
-    if user_id not in settings.ADMIN_ID_LIST: return
-    
+
+    # Проверяем админа гибко (и список, и просто строку)
+    is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
+
+    if not is_admin:
+        # Если не админ - бот больше не молчит, а дает инструкцию!
+        await update.message.reply_text(
+            f"⛔️ Вы не администратор.\n\nВаш Telegram ID: `{user_id}`\n\nВставьте этот ID в переменную `ADMIN_IDS` в настройках Railway.", 
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
     chat_id = update.effective_chat.id
     chat_manager = context.application.chat_manager
     current_mode = chat_manager.get_mode(chat_id)
     
     text = f"🤖 Режим AI: *{current_mode.upper()}*\nВыберите личность:"
-    keyboard = [[InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{p['name']}", callback_data=f"set_mode|{mode}")] for mode, p in PERSONAS.items()]
+    keyboard = [
+        [InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{p['name']}", callback_data=f"set_mode|{mode}")]
+        for mode, p in PERSONAS.items()
+    ]
     keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="close_admin")])
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
 
