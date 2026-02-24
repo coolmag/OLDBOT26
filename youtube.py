@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import List, Optional
-from dataclasses import replace
+from dataclasses import replace, asdict
 
 import httpx
 import yt_dlp
@@ -199,8 +199,10 @@ class YouTubeDownloader:
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
         }
         
-        if self._settings.COOKIES_FILE.exists():
-            opts['cookiefile'] = str(self._settings.COOKIES_FILE)
+        # OMITTING COOKIES: The 'ios' and 'tv' clients do not support cookies
+        # and providing them seems to cause a "page needs to be reloaded" error.
+        # if self._settings.COOKIES_FILE.exists():
+        #     opts['cookiefile'] = str(self._settings.COOKIES_FILE)
             
         try:
             loop = asyncio.get_running_loop()
@@ -244,7 +246,7 @@ class YouTubeDownloader:
             if not song_data or not song_data.get('videoDetails'): return None
             details = song_data['videoDetails']
             track_info = TrackInfo(identifier=details['videoId'], title=details['title'], uploader=details.get('author', ''), duration=int(details.get('lengthSeconds', 0)), url=f"https://music.youtube.com/watch?v={details['videoId']}", thumbnail_url=details['thumbnail']['thumbnails'][-1]['url'] if details.get('thumbnail') else None, source=Source.YOUTUBE)
-            await self._cache.set(f"trackinfo:{video_id}", track_info.dict(), ttl=3600 * 24 * 7)
+            await self._cache.set(f"trackinfo:{video_id}", dataclasses.asdict(track_info), ttl=3600 * 24 * 7)
             return track_info
         except Exception:
             return None

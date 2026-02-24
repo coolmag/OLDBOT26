@@ -110,6 +110,11 @@ async def telegram_webhook(request: Request):
         logger.error(f"Webhook processing error: {e}", exc_info=True)
     return {"ok": True}
 
+@app.get("/api/health")
+async def health_check():
+    """Railway Health Check Endpoint"""
+    return {"status": "ok", "engine": "Cobalt Waterfall v3.1"}
+
 @app.get("/api/player/playlist")
 async def get_playlist(query: str, request: Request):
     downloader = request.app.state.downloader

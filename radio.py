@@ -204,8 +204,13 @@ class RadioSession:
             caption = get_now_playing_message(track, self.display_name)
             markup = None
             player_url = getattr(self.settings, 'PLAYER_URL', getattr(self.settings, 'BASE_URL', ''))
-            if player_url and self.chat_type != ChatType.CHANNEL:
-                markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Открыть в плеере", url=player_url)]])
+            buttons = []
+            if player_url:
+                buttons.append(InlineKeyboardButton("▶️ Открыть в плеере", url=player_url))
+            buttons.append(InlineKeyboardButton("⏭ Пропустить", callback_data="skip_track"))
+            
+            if buttons and self.chat_type != ChatType.CHANNEL:
+                markup = InlineKeyboardMarkup([buttons])
 
             audio_source = result.file_path
             

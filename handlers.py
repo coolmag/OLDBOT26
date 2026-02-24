@@ -195,6 +195,17 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(update.effective_chat.id, "🛑 Радио остановлено.")
 
 
+async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Skips the current track in radio mode."""
+    radio_manager = context.application.radio_manager
+    await radio_manager.skip(update.effective_chat.id)
+    # Give a silent notification that the skip is happening
+    try:
+        await context.bot.send_message(update.effective_chat.id, "⏭ Переключаю трек...", disable_notification=True, reply_to_message_id=update.message.message_id)
+    except:
+        pass # Ignore if original message is deleted
+
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
@@ -218,12 +229,23 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     user_id = query.from_user.id
     settings = context.application.settings
-    
+    chat_id = update.effective_chat.id
+
     if query.data == "close_admin":
         await query.delete_message()
+        return
+
+    if query.data == "skip_track":
+        radio_manager = context.application.radio_manager
+        await radio_manager.skip(chat_id)
+        # Immediately delete the message with the skip button to prevent multiple skips
+        try:
+            await query.delete_message()
+        except:
+            pass # Message might be already gone
         return
 
     if query.data.startswith("set_mode|"):
@@ -233,10 +255,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         mode = query.data.split("|")[1]
         chat_manager = context.application.chat_manager
-        chat_manager.set_mode(update.effective_chat.id, mode)
+        chat_manager.set_mode(chat_id, mode)
         
         greeting = random.choice(GREETINGS.get(mode, ["Привет!"]))
-        await context.bot.send_message(update.effective_chat.id, greeting)
+        await context.bot.send_message(chat_id, greeting)
         await query.delete_message()
 
 
@@ -246,6 +268,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("play", play_command))
     app.add_handler(CommandHandler("radio", radio_command))
     app.add_handler(CommandHandler("stop", stop_command))
+    app.add_handler(CommandHandler("skip", skip_command))
     app.add_handler(CommandHandler("admin", admin_command))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
