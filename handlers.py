@@ -92,12 +92,13 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
 
-async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE):
+async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, update: Update):
     effective_query = query or "случайные популярные треки"
     await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{effective_query}*", parse_mode=ParseMode.MARKDOWN)
     
     radio_manager = context.application.radio_manager
-    asyncio.create_task(radio_manager.start(chat_id, effective_query))
+    # Pass the chat_type from the update object
+    asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=update.effective_chat.type))
 
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE):

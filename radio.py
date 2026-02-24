@@ -203,9 +203,14 @@ class RadioSession:
             
             caption = get_now_playing_message(track, self.display_name)
             markup = None
+            
+            # --- DIAGNOSTIC LOGGING FOR PLAYER BUTTON ---
             player_url = getattr(self.settings, 'PLAYER_URL', getattr(self.settings, 'BASE_URL', ''))
+            logger.info(f"[{self.chat_id}] Checking for Player URL. Found: '{player_url}'")
+            
             buttons = []
             if player_url:
+                logger.info(f"[{self.chat_id}] Player URL is not empty. Creating button.")
                 buttons.append(InlineKeyboardButton("▶️ Открыть в плеере", url=player_url))
             buttons.append(InlineKeyboardButton("⏭ Пропустить", callback_data="skip_track"))
             
