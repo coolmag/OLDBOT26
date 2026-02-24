@@ -1,0 +1,19 @@
+fastapi
+uvicorn[standard]
+python-telegram-bot
+google-genai>=1.60.0
+yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
+aiosqlite
+pydantic
+pydantic-settings
+httpx>=0.24.0
+ytmusicapi>=1.0.0
+psutil
+nest-asyncio
+beautifulsoup4
+spotipy
+ffmpeg-python
+brotli
+pycryptodomex
+python-v2ray
+v2ray2proxy

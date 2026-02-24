@@ -1,0 +1,64 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Python
+.Python
+*.so
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+*.cover
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.mp3
+*.wav
+downloads/
+temp_audio/
+.cache/
+*.db
+__pycache__/
+
+# Test files (keep test_*.py in root, exclude others)
+test_*.py
+!test_vk_engine.py
+
+# Data files (don't commit)
+data*.txt
+*.log
+*.sqlite3
