@@ -7,133 +7,155 @@
     <title>Aurora СВЕМА</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        :root { --bg: #111; --cyan: #00f3ff; --pink: #ff0055; --btn-bg: #222; }
-        body { background-color: var(--bg); background-image: radial-gradient(circle at center, #222 0%, #000 100%); color: #fff; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; user-select: none; }
+        :root { 
+            --bg: #0d0d0f; --cyan: #00f3ff; --pink: #ff0055; --btn-bg: #1a1a1c;
+            --tape-l: 75px; /* Размер левой катушки пленки */
+            --tape-r: 28px; /* Размер правой катушки пленки */
+        }
         
-        /* СОВЕТСКАЯ КАССЕТА СВЕМА МК-60 */
+        body { background-color: var(--bg); background-image: radial-gradient(circle at center, #1a1a1f 0%, #000 100%); color: #fff; font-family: 'SF Mono', 'Cascadia Code', 'Roboto Mono', 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; user-select: none; }
+        
+        /* ИНФО О ТРЕКЕ (Четкий шрифт, неоновое свечение) */
+        .info { text-align: center; width: 100%; max-width: 340px; margin-bottom: 25px; padding: 10px; border-radius: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(0, 243, 255, 0.1); box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .title { color: #fff; font-weight: 900; font-size: 17px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; text-shadow: 0 0 10px rgba(255,255,255,0.5); letter-spacing: 0.5px;}
+        .artist { font-size: 14px; color: var(--cyan); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px;}
+
+        /* ФОТОРЕАЛИСТИЧНАЯ КАССЕТА СВЕМА */
         .cassette {
-            width: 340px; height: 210px; background: #e8e8e6; /* Белый/серый пластик */
-            border-radius: 12px; position: relative;
-            box-shadow: inset 0 0 15px rgba(0,0,0,0.2), 0 25px 50px rgba(0,0,0,0.9);
-            border: 2px solid #ccc; border-bottom: 6px solid #bbb;
-            display: flex; flex-direction: column; align-items: center; padding: 15px; transition: transform 0.2s;
-            /* Рифленые края пластика */
-            background-image: repeating-linear-gradient(90deg, transparent, transparent 15px, rgba(0,0,0,0.03) 15px, rgba(0,0,0,0.03) 20px);
+            width: 350px; height: 220px; 
+            background: linear-gradient(to bottom, #eeeeeb, #dcdcd8);
+            border-radius: 14px; position: relative;
+            box-shadow: 
+                inset 0 2px 3px rgba(255,255,255,0.9), 
+                inset 0 -4px 6px rgba(0,0,0,0.2), 
+                0 30px 40px rgba(0,0,0,0.8),
+                0 0 0 1px #888; /* Тонкая рамка пластика */
+            display: flex; flex-direction: column; align-items: center; padding: 15px; 
+            transition: transform 0.1s;
+        }
+        /* Скос (Трапеция внизу) */
+        .cassette::after {
+            content: ''; position: absolute; bottom: 0; left: 10%; width: 80%; height: 20px;
+            background: linear-gradient(to bottom, #dcdcd8, #cececa);
+            border-radius: 4px 4px 0 0; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        /* Винтики */
-        .screw { position: absolute; width: 14px; height: 14px; background: #ddd; border-radius: 50%; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.3), 0 1px 1px #fff; border: 1px solid #aaa; }
-        .screw::before, .screw::after { content: ''; position: absolute; top: 50%; left: 15%; width: 70%; height: 2px; background: #777; }
+        /* Металлические Винтики (Крестовые) */
+        .screw { position: absolute; width: 14px; height: 14px; background: linear-gradient(135deg, #d4d4d4, #888); border-radius: 50%; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6), 0 1px 1px rgba(255,255,255,0.8); border: 1px solid #666; }
+        .screw::before, .screw::after { content: ''; position: absolute; top: 50%; left: 20%; width: 60%; height: 1.5px; background: rgba(0,0,0,0.7); box-shadow: 0 1px 0 rgba(255,255,255,0.3); }
         .screw::before { transform: translateY(-50%) rotate(45deg); } .screw::after { transform: translateY(-50%) rotate(-45deg); }
-        .tl { top: 10px; left: 10px; } .tr { top: 10px; right: 10px; } .bl { bottom: 10px; left: 10px; } .br { bottom: 10px; right: 10px; }
+        .tl { top: 12px; left: 12px; } .tr { top: 12px; right: 12px; } .bl { bottom: 12px; left: 12px; } .br { bottom: 12px; right: 12px; }
 
-        /* Наклейка */
+        /* Бумажная Наклейка */
         .label {
-            width: 95%; height: 130px; background: #fdfdfd; border-radius: 6px; position: relative;
-            box-shadow: inset 0 0 10px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.2);
-            border: 1px solid #ddd; display: flex; flex-direction: column; align-items: center; overflow: hidden;
+            width: 92%; height: 140px; background: #faf9f5; border-radius: 8px; position: relative;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.3);
+            border: 1px solid rgba(0,0,0,0.1); display: flex; flex-direction: column; align-items: center; overflow: hidden;
+            background-image: repeating-linear-gradient(0deg, transparent, transparent 4px, rgba(0,0,0,0.01) 4px, rgba(0,0,0,0.01) 5px); /* Текстура бумаги */
         }
 
-        /* Дизайн Свема */
-        .svema-logo { position: absolute; top: 12px; left: 15px; border: 2px solid #d00; color: #d00; padding: 2px 6px; font-family: serif; font-weight: bold; font-size: 14px; border-radius: 4px; letter-spacing: 1px; }
-        .red-lines { position: absolute; top: 18px; right: 15px; width: 50%; height: 8px; border-top: 2px solid #d00; border-bottom: 2px solid #d00; }
+        /* Типографика Свема */
+        .svema-logo { position: absolute; top: 14px; left: 16px; border: 2px solid #c1121f; color: #c1121f; padding: 2px 8px; font-family: 'Times New Roman', Times, serif; font-weight: 900; font-size: 16px; border-radius: 4px; letter-spacing: 1.5px; text-shadow: 0 0 1px rgba(193,18,31,0.3); }
+        .red-lines { position: absolute; top: 20px; right: 16px; width: 48%; height: 10px; border-top: 2.5px solid #c1121f; border-bottom: 2.5px solid #c1121f; }
         
-        .black-block {
-            position: absolute; top: 45px; width: 100%; height: 50px; background: #1a1a1a;
-            display: flex; justify-content: center; align-items: center; box-shadow: inset 0 2px 5px #000;
-        }
+        .black-block { position: absolute; top: 50px; width: 100%; height: 55px; background: #181818; display: flex; justify-content: center; align-items: center; box-shadow: inset 0 3px 6px #000, 0 1px 1px rgba(255,255,255,0.5); }
+        
+        .green-block { position: absolute; bottom: 10px; width: 92%; height: 24px; background: #8fb399; display: flex; justify-content: space-between; align-items: center; padding: 0 12px; color: #a00; font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: 17px; border: 1px solid #789981; box-shadow: inset 0 1px 3px rgba(255,255,255,0.4); }
 
-        .green-block {
-            position: absolute; bottom: 8px; width: 90%; height: 22px; background: #9dbca6;
-            display: flex; justify-content: space-between; align-items: center; padding: 0 10px;
-            color: #d00; font-family: sans-serif; font-weight: 900; font-size: 16px; border: 1px solid #8ba894;
-        }
-
-        /* Окошко с пленкой */
+        /* Акриловое Окошко и Магнитная пленка */
         .window {
-            width: 200px; height: 35px; background: rgba(255,255,255,0.8); border-radius: 4px;
-            border: 2px solid #555; display: flex; justify-content: space-between; align-items: center;
-            padding: 0 15px; position: relative; box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
+            width: 220px; height: 38px; background: rgba(255,255,255,0.1); border-radius: 5px;
+            border: 2px solid #444; border-top: 3px solid #222; border-bottom: 2px solid #777;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 18px; position: relative; box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
+            overflow: hidden; backdrop-filter: blur(1px); /* Эффект мутного пластика */
         }
-        .spool { width: 28px; height: 28px; background: #f0f0f0; border-radius: 50%; border: 3px solid #111; position: relative; box-shadow: 0 0 4px #000; }
-        /* Зубчики в катушке */
-        .spool::after {
-            content: ''; position: absolute; inset: 0;
-            background: conic-gradient(transparent 10%, #333 10% 20%, transparent 20% 40%, #333 40% 50%, transparent 50% 70%, #333 70% 80%, transparent 80%);
-            border-radius: 50%; animation: spin 2s linear infinite; animation-play-state: paused;
+        
+        /* Блик на стекле */
+        .window::before { content: ''; position: absolute; top: 0; left: -50%; width: 200%; height: 100%; background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.15) 45%, transparent 50%); z-index: 10; pointer-events: none; }
+
+        /* ДИНАМИЧЕСКИЕ РУЛОНЫ ПЛЕНКИ (Темно-коричневая текстура магнитной ленты) */
+        .tape-roll { position: absolute; bottom: -10px; border-radius: 50%; background: radial-gradient(circle, #2a221f 0%, #111 80%); box-shadow: 0 0 0 1px #000, 0 0 6px #000; transition: width 0.3s linear, height 0.3s linear; z-index: 1; }
+        .tape-left { left: 40px; width: var(--tape-l); height: var(--tape-l); transform: translateX(-50%); }
+        .tape-right { right: 40px; width: var(--tape-r); height: var(--tape-r); transform: translateX(50%); }
+
+        /* Идеальные шестигранные шпиндели */
+        .spool { width: 30px; height: 30px; border-radius: 50%; background: #e0e0e0; position: relative; z-index: 5; box-shadow: 0 2px 4px rgba(0,0,0,0.8), inset 0 0 2px #fff; border: 1px solid #999; }
+        .spool-teeth {
+            position: absolute; inset: 2px; border-radius: 50%;
+            background: repeating-conic-gradient(#333 0deg, #333 30deg, #ddd 30deg, #ddd 60deg);
+            -webkit-mask-image: radial-gradient(circle, transparent 35%, black 36%);
+            mask-image: radial-gradient(circle, transparent 35%, black 36%);
+            animation: spin 2.5s linear infinite; animation-play-state: paused;
         }
-        .playing .spool::after { animation-play-state: running; }
+        .spool::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background: #111; border-radius: 50%; }
+        .playing .spool-teeth { animation-play-state: running; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        .bridge { width: 70px; height: 26px; background: #000; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 2px; opacity: 0.9; }
 
-        /* Текст трека (Поверх кассеты) */
-        .info { margin-top: -15px; text-align: center; width: 100%; z-index: 5; background: rgba(0,0,0,0.8); padding: 5px 0; border-radius: 4px; margin-bottom: 20px; border: 1px solid #333;}
-        .title { color: var(--cyan); font-weight: 900; font-size: 16px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; padding: 0 10px;}
-        .artist { font-size: 13px; color: #aaa; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; padding: 0 10px;}
+        /* Неоновый Прогресс-бар */
+        .progress-wrapper { width: 100%; max-width: 350px; height: 6px; background: rgba(0,0,0,0.6); border-radius: 3px; overflow: hidden; border: 1px solid #333; margin-top: 25px; cursor: pointer;}
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--pink)); box-shadow: 0 0 10px var(--pink); transition: width 0.1s linear; }
 
-        /* Прогресс-бар */
-        .progress-wrapper { width: 100%; max-width: 340px; height: 6px; background: #222; border-radius: 3px; overflow: hidden; border: 1px solid #333; }
-        .progress-fill { width: 0%; height: 100%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); transition: width 0.1s linear; }
-
-        /* Кнопки управления */
-        .main-controls { margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; }
+        /* Механические Кнопки */
+        .main-controls { margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; }
         .btn {
-            background: var(--btn-bg); border: 2px solid #111; color: #aaa; font-family: 'Courier New', monospace;
-            font-weight: 900; font-size: 16px; padding: 12px 14px; cursor: pointer;
-            box-shadow: 0 4px 0 #000, 0 5px 5px rgba(0,0,0,0.5); border-radius: 6px; transition: all 0.1s;
+            background: var(--btn-bg); border: 1px solid #333; color: #999; font-family: inherit;
+            font-weight: bold; font-size: 15px; padding: 14px 18px; cursor: pointer;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 4px 0 #000, 0 6px 10px rgba(0,0,0,0.5); 
+            border-radius: 8px; transition: all 0.1s; display: flex; align-items: center; justify-content: center;
         }
         .btn:active { transform: translateY(4px); box-shadow: 0 0 0 #000, inset 0 2px 5px rgba(0,0,0,0.5); color: #fff; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: 0 4px 0 #000; }
-        .play-btn { color: var(--cyan); border-color: #004444; min-width: 80px; }
-        .playing .play-btn { color: var(--pink); border-color: #440011; text-shadow: 0 0 8px var(--pink); box-shadow: 0 4px 0 #000, 0 0 15px rgba(255,0,85,0.3); }
+        .play-btn { color: var(--cyan); border-color: #005555; min-width: 90px; font-size: 16px; font-weight: 900; letter-spacing: 1px;}
+        .playing .play-btn { color: #fff; background: var(--pink); border-color: #ff0055; text-shadow: 0 1px 2px rgba(0,0,0,0.5); box-shadow: 0 4px 0 #880022, 0 0 20px rgba(255,0,85,0.4); }
 
         /* Поиск */
-        .search-box { margin-top: 20px; width: 100%; max-width: 340px; display: flex; justify-content: center; }
+        .search-box { margin-top: 25px; width: 100%; max-width: 350px; display: flex; justify-content: center; }
         input {
-            background: #000; border: 2px solid #333; color: var(--cyan); font-family: 'Courier New', monospace; font-weight: bold;
-            padding: 12px; width: 100%; text-transform: uppercase; outline: none; text-align: center;
-            border-radius: 6px; box-shadow: inset 0 0 10px rgba(0,243,255,0.1); transition: border-color 0.3s;
+            background: rgba(0,0,0,0.5); border: 1px solid #444; color: #fff; font-family: inherit; font-weight: bold;
+            padding: 14px; width: 100%; text-transform: uppercase; outline: none; text-align: center; font-size: 15px;
+            border-radius: 8px; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5); transition: all 0.3s;
         }
-        input:focus { border-color: var(--cyan); }
-        input::placeholder { color: #555; font-weight: normal; }
+        input:focus { border-color: var(--cyan); box-shadow: inset 0 2px 5px rgba(0,0,0,0.5), 0 0 10px rgba(0,243,255,0.2); }
+        input::placeholder { color: #666; font-weight: normal; }
 
-        /* Меню (Drawers) */
+        /* Окна меню */
         .drawer-container { position: fixed; inset: 0; z-index: 100; pointer-events: none; }
-        .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(3px); opacity: 0; transition: opacity 0.3s; }
+        .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); opacity: 0; transition: opacity 0.3s; }
         .drawer {
-            position: absolute; bottom: 0; left: 0; right: 0; height: 70vh; background: #111;
-            border-radius: 20px 20px 0 0; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 1, 0.5, 1);
-            display: flex; flex-direction: column; padding: 20px; border-top: 2px solid var(--cyan); box-shadow: 0 -10px 40px rgba(0,243,255,0.1);
+            position: absolute; bottom: 0; left: 0; right: 0; height: 75vh; background: #121214;
+            border-radius: 24px 24px 0 0; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 1, 0.5, 1);
+            display: flex; flex-direction: column; padding: 25px 20px; border-top: 1px solid rgba(255,255,255,0.1); box-shadow: 0 -10px 50px rgba(0,0,0,0.8);
         }
-        #drawer-title { margin: 0; color: var(--cyan); text-shadow: 0 0 5px var(--cyan); text-transform: uppercase; }
+        .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        #drawer-title { margin: 0; color: #fff; font-size: 18px; font-weight: 900; letter-spacing: 1px; }
+        .close-btn { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 0; transition: background 0.2s; }
+        .close-btn:active { background: rgba(255,255,255,0.2); }
         #drawer-content { overflow-y: auto; color: #fff; padding-bottom: 20px; }
         .drawer-container.active { pointer-events: all; } .drawer-container.active .overlay { opacity: 1; } .drawer-container.active .drawer { transform: translateY(0); }
         
         .menu-item, .playlist-item {
-            padding: 14px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 10px;
-            cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent;
+            padding: 16px; background: rgba(255,255,255,0.03); border-radius: 12px; margin-bottom: 12px;
+            cursor: pointer; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.02);
         }
-        .menu-item:hover, .playlist-item:hover { background: rgba(255,255,255,0.1); border-left-color: var(--cyan); }
-        .playlist-item.active { background: rgba(255,0,85,0.15); border-left-color: var(--pink); color: var(--pink); font-weight: bold; }
+        .menu-item:active, .playlist-item:active { background: rgba(255,255,255,0.08); transform: scale(0.98); }
+        .playlist-item.active { background: rgba(0, 243, 255, 0.1); border-color: var(--cyan); color: var(--cyan); font-weight: bold; }
 
-        /* Модалка ИИ */
         .modal {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; gap: 15px; padding: 20px; opacity: 0; pointer-events: none;
-            transition: opacity 0.3s; backdrop-filter: blur(5px);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 200; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; gap: 20px; padding: 20px; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s; backdrop-filter: blur(10px);
         }
         .modal.active { opacity: 1; pointer-events: all; }
     </style>
 </head>
 <body>
 
-    <!-- Название трека вынесено из кассеты, чтобы текст не плыл -->
     <div class="info">
-        <span class="title" id="title">НЕТ КАССЕТЫ</span>
-        <span class="artist" id="artist">ВСТАВЬТЕ ПЛЕНКУ</span>
+        <span class="title" id="title">АВРОРА СВЕМА</span>
+        <span class="artist" id="artist">ОЖИДАНИЕ КАССЕТЫ</span>
     </div>
 
-    <!-- Кассета СВЕМА -->
     <div class="cassette" id="deck">
         <div class="screw tl"></div><div class="screw tr"></div><div class="screw bl"></div><div class="screw br"></div>
         <div class="label">
@@ -141,17 +163,22 @@
             <div class="red-lines"></div>
             
             <div class="black-block">
-                <div class="window"><div class="spool"></div><div class="bridge"></div><div class="spool"></div></div>
+                <div class="window">
+                    <div class="tape-roll tape-left"></div>
+                    <div class="tape-roll tape-right"></div>
+                    <div class="spool"><div class="spool-teeth"></div></div>
+                    <div class="spool"><div class="spool-teeth"></div></div>
+                </div>
             </div>
 
             <div class="green-block">
                 <span>МК-60-5</span>
-                <span style="color:#333; font-size:12px;">1991</span>
+                <span style="color:#333; font-size:13px;">1991</span>
             </div>
         </div>
     </div>
 
-    <div class="progress-wrapper" style="margin-top:20px;"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-wrapper" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
 
     <div class="main-controls">
         <button class="btn" id="btn-prev" onclick="app.player.prev()">◀◀</button>
@@ -162,30 +189,27 @@
         <button class="btn" onclick="app.ui.toggleAIModal(true)">🤖</button>
     </div>
 
-    <!-- Обернуто в форму для поддержки клавиши Enter -->
     <form class="search-box" onsubmit="app.search(); return false;">
         <input type="text" id="query" placeholder="ПОИСК ИЛИ ИИ...">
     </form>
 
-    <!-- Меню с крестиком -->
     <div id="drawer-container" class="drawer-container">
         <div class="overlay" id="overlay-bg"></div>
         <div id="drawer" class="drawer">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid rgba(0,243,255,0.2); padding-bottom: 10px;">
-                <h3 id="drawer-title"></h3>
-                <button onclick="app.ui.toggleDrawer()" style="background:none; border:none; color:#fff; font-size:36px; cursor:pointer; line-height:0.5;">&times;</button>
+            <div class="drawer-header">
+                <h3 id="drawer-title">МЕНЮ</h3>
+                <button class="close-btn" onclick="app.ui.toggleDrawer()">&times;</button>
             </div>
             <div id="drawer-content"></div>
         </div>
     </div>
 
-    <!-- Модалка ИИ обернута в форму для работы Enter -->
     <form id="ai-modal" class="modal" onsubmit="app.askAI(); return false;">
-        <h3 style="color:var(--cyan); margin-bottom: 0;">ИИ ДИДЖЕЙ</h3>
-        <input type="text" id="ai-input" placeholder="ЧТО ВКЛЮЧИТЬ?">
-        <div style="display:flex; gap:10px;">
+        <h3 style="color:var(--cyan); margin-bottom: 0; font-size:22px; letter-spacing:1px;">ИИ ДИДЖЕЙ</h3>
+        <input type="text" id="ai-input" placeholder="ЧТО НАЙТИ ДЛЯ ВАС?">
+        <div style="display:flex; gap:15px; width: 100%; max-width: 320px;">
             <button type="submit" class="btn play-btn" id="ai-btn">ВРУБАЙ</button>
-            <button type="button" class="btn" onclick="app.ui.toggleAIModal(false)">ОТМЕНА</button>
+            <button type="button" class="btn" onclick="app.ui.toggleAIModal(false)" style="flex:1;">ОТМЕНА</button>
         </div>
     </form>
 
@@ -227,7 +251,7 @@
                     this.audio.addEventListener("play", () => app.ui.setPlayState(true));
                     this.audio.addEventListener("pause", () => app.ui.setPlayState(false));
                     this.audio.addEventListener("error", () => {
-                        app.ui.showError("ОШИБКА ПЛЕНКИ");
+                        app.ui.showError("ПЛЕНКА ЗАЖЕВАНА");
                         setTimeout(() => { if (app.store._s.p.length > 1) this.next(); }, 2000);
                     });
                 },
@@ -281,61 +305,52 @@
                     this.setPlayState(false);
                 },
                 setLoading(isLoading) {
-                    // Блокируем кнопки во время загрузки, чтобы не накликали
                     this.get("playBtn").disabled = isLoading;
                     this.get("btn-next").disabled = isLoading;
                     this.get("btn-prev").disabled = isLoading;
                     if (isLoading) {
-                        this.get("title").innerText = "ЗАГРУЗКА...";
+                        this.get("title").innerText = "НАСТРОЙКА ЧАСТОТЫ...";
                         this.get("artist").innerText = "ОЖИДАЙТЕ...";
                     }
                 },
                 updateProgress(current, total) {
                     if (total > 0) {
-                        const percent = (current / total) * 100;
-                        this.get("progress-fill").style.width = `${percent}%`;
+                        const percent = current / total;
+                        this.get("progress-fill").style.width = `${percent * 100}%`;
+                        
+                        // МАГИЯ ФИЗИКИ ПЛЕНКИ
+                        const maxTape = 75; const minTape = 28;
+                        const leftSize = maxTape - (percent * (maxTape - minTape));
+                        const rightSize = minTape + (percent * (maxTape - minTape));
+                        document.documentElement.style.setProperty('--tape-l', `${leftSize}px`);
+                        document.documentElement.style.setProperty('--tape-r', `${rightSize}px`);
                     }
                 },
                 toggleDrawer(drawerType) {
                     const container = this.get("drawer-container");
-                    if (this._dr && this._dr === drawerType) {
-                        this._dr = null; 
-                    } else {
-                        this._dr = drawerType; 
-                    }
+                    if (this._dr && this._dr === drawerType) { this._dr = null; } else { this._dr = drawerType; }
                     if (this._dr) {
                         container.classList.add("active");
-                        this.get("drawer-title").textContent = this._dr === "playlist" ? "ОЧЕРЕДЬ ТРЕКОВ" : "ЖАНРЫ";
+                        this.get("drawer-title").textContent = this._dr === "playlist" ? "ОЧЕРЕДЬ ТРЕКОВ" : "КАТАЛОГ ЖАНРОВ";
                         this.renderDrawer();
-                    } else {
-                        container.classList.remove("active");
-                    }
+                    } else { container.classList.remove("active"); }
                 },
                 renderDrawer() {
                     const content = this.get("drawer-content");
                     content.innerHTML = "";
                     if (this._dr === "playlist") {
-                        if (app.store._s.p.length === 0) content.innerHTML = "<div style='text-align:center;color:#666'>КАССЕТА ПУСТА</div>";
+                        if (app.store._s.p.length === 0) content.innerHTML = "<div style='text-align:center;color:#666;margin-top:20px;'>КАССЕТА ПУСТА</div>";
                         app.store._s.p.forEach((track, i) => {
                             const div = document.createElement("div");
                             div.className = "playlist-item" + (i === app.store._s.ci ? " active" : "");
                             div.textContent = `${track.title} - ${track.artist || track.uploader}`;
-                            div.onclick = () => {
-                                app.store.set({ ci: i });
-                                app.player.play(track);
-                                this.toggleDrawer();
-                            };
+                            div.onclick = () => { app.store.set({ ci: i }); app.player.play(track); this.toggleDrawer(); };
                             content.appendChild(div);
                         });
                     } else if (this._dr === "genres") {
                         app.genres.forEach(genre => {
-                            const div = document.createElement("div");
-                            div.className = "menu-item";
-                            div.textContent = genre.n;
-                            div.onclick = () => {
-                                app.search(genre.q);
-                                this.toggleDrawer();
-                            };
+                            const div = document.createElement("div"); div.className = "menu-item"; div.textContent = genre.n;
+                            div.onclick = () => { app.search(genre.q); this.toggleDrawer(); };
                             content.appendChild(div);
                         });
                     }
@@ -355,16 +370,14 @@
             async search(queryStr) {
                 const q = (typeof queryStr === 'string') ? queryStr : this.ui.get("query").value;
                 if (!q) return;
-                
-                this.ui.setLoading(true); // Включаем "Загрузка..."
-                
+                this.ui.setLoading(true);
                 try {
                     const res = await this.api.search(q);
                     if (res.playlist && res.playlist.length > 0) {
                         this.store.set({ p: res.playlist, ci: 0 });
                         this.player.play(res.playlist[0]);
-                    } else { this.ui.showError("НЕ НАЙДЕНО"); }
-                } catch (e) { this.ui.showError("ОШИБКА СЕТИ"); }
+                    } else { this.ui.showError("ТРЕК НЕ НАЙДЕН"); }
+                } catch (e) { this.ui.showError("НЕТ СИГНАЛА"); }
                 finally { this.ui.setLoading(false); }
             },
             
@@ -372,19 +385,18 @@
                 const q = this.ui.get("ai-input").value;
                 if (!q) return;
                 
-                // ⚠️ ВАЖНО: Разблокируем Web Speech API сразу по клику, до отправки запроса
+                // РАЗБЛОКИРОВКА АУДИО (Синхронно с кликом)
                 if ('speechSynthesis' in window) {
                     window.speechSynthesis.resume();
                     window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
                 }
 
                 this.ui.toggleAIModal(false);
-                this.ui.setLoading(true); // Включаем "Загрузка..."
+                this.ui.setLoading(true);
                 
                 try {
                     const res = await this.api.askAI(q);
                     
-                    // Озвучка ответа ИИ
                     if (res.message && 'speechSynthesis' in window) {
                         window.speechSynthesis.cancel();
                         const utterance = new SpeechSynthesisUtterance(res.message);
@@ -396,8 +408,8 @@
                     if (res.playlist && res.playlist.length > 0) {
                         this.store.set({ p: res.playlist, ci: 0 });
                         this.player.play(res.playlist[0]);
-                    } else { this.ui.showError("НЕ НАЙДЕНО ИИ"); }
-                } catch (e) { this.ui.showError("ОШИБКА ИИ"); }
+                    } else { this.ui.showError("ИИ НЕ НАШЕЛ"); }
+                } catch (e) { this.ui.showError("СБОЙ ИИ"); }
                 finally { this.ui.setLoading(false); }
             },
             
@@ -406,6 +418,12 @@
                 this.store.sub("t", track => this.ui.updateTrackInfo(track));
                 this.store.sub("p", () => { if (this.ui._dr) this.ui.renderDrawer(); });
                 this.ui.get("overlay-bg").onclick = () => this.ui.toggleDrawer();
+                
+                // Перемотка по клику на бар
+                this.ui.get("progress-bar").onclick = (e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    app.player.audio.currentTime = ((e.clientX - rect.left) / rect.width) * app.player.audio.duration;
+                };
             }
         };
 
