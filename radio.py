@@ -187,8 +187,10 @@ class RadioSession:
             markup = None
             if self.chat_type != ChatType.CHANNEL:
                 buttons = []
-                player_url = getattr(self.settings, 'PLAYER_URL', getattr(self.settings, 'BASE_URL', ''))
-                if player_url: buttons.append(InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url)))
+                player_url = getattr(self.settings, 'PLAYER_URL', '') or getattr(self.settings, 'BASE_URL', '') or getattr(self.settings, 'WEBHOOK_URL', '').replace('/telegram', '')
+                if player_url: 
+                    if not player_url.startswith('http'): player_url = f"https://{player_url}"
+                    buttons.append(InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url)))
                 buttons.append(InlineKeyboardButton("⏭ Скип", callback_data="skip_track"))
                 markup = InlineKeyboardMarkup([buttons])
 
