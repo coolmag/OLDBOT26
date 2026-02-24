@@ -242,11 +242,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "skip_track":
         radio_manager = context.application.radio_manager
         await radio_manager.skip(chat_id)
-        # Immediately delete the message with the skip button to prevent multiple skips
+        # Убираем кнопку скип с текущего сообщения, чтобы не нажали дважды
         try:
-            await query.delete_message()
-        except:
-            pass # Message might be already gone
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass # Ignore if message is too old or already deleted
         return
 
     if query.data.startswith("set_mode|"):

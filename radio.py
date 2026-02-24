@@ -4,7 +4,7 @@ import random
 import os
 from typing import List, Optional, Dict, Set
 from dataclasses import dataclass, field
-from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.constants import ParseMode, ChatType
 from telegram.error import BadRequest, RetryAfter, Forbidden
 from config import Settings
@@ -210,8 +210,9 @@ class RadioSession:
             
             buttons = []
             if player_url:
-                logger.info(f"[{self.chat_id}] Player URL is not empty. Creating button.")
-                buttons.append(InlineKeyboardButton("▶️ Открыть в плеере", url=player_url))
+                logger.info(f"[{self.chat_id}] Player URL is not empty. Creating Web App button.")
+                buttons.append(InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url)))
+            
             buttons.append(InlineKeyboardButton("⏭ Пропустить", callback_data="skip_track"))
             
             if buttons and self.chat_type != ChatType.CHANNEL:
