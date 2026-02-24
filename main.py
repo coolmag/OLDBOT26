@@ -1,4 +1,4 @@
-# Version: 51 - Cobalt Integration
+# Version: 52 - Gemini 3.1 Refactor
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -6,7 +6,7 @@ import shutil
 import os
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from telegram import Update, BotCommand
@@ -21,7 +21,6 @@ from handlers import setup_handlers
 from cache_service import CacheService
 from ai_manager import AIManager
 from chat_service import ChatManager
-from cobalt_downloader import CobaltDownloader
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +31,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     
-    logger.info("⚡ System Starting Up...")
+    logger.info("⚡ System Starting Up (Cobalt Engine)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg detected.")
-    else: logger.warning("⚠️ FFmpeg not found! Local downloads might fail.")
+    else: logger.warning("⚠️ FFmpeg not found! Local fallbacks might fail.")
 
     # 2. Инициализация кэша
     cache = CacheService(settings.CACHE_DB_PATH)
@@ -44,9 +43,8 @@ async def lifespan(app: FastAPI):
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager)
     
-    # 4. Инициализация загрузчиков (Cobalt + Fallbacks)
-    cobalt_downloader = CobaltDownloader(settings)
-    downloader = YouTubeDownloader(settings, cache, cobalt_downloader)
+    # 4. Инициализация ЕДИНОГО загрузчика, который управляет всеми фоллбэками
+    downloader = YouTubeDownloader(settings, cache)
     spotify_service = SpotifyService(settings, downloader)
     
     # 5. Сборка и настройка Telegram приложения
@@ -116,8 +114,6 @@ async def telegram_webhook(request: Request):
 async def get_playlist(query: str, request: Request):
     downloader = request.app.state.downloader
     tracks = await downloader.search(query=query, limit=15)
-    # Pre-emptively trigger downloads for the first few tracks
-    # This will use Cobalt and not block the server
     if tracks:
         for track in tracks[:3]:
             asyncio.create_task(downloader.download(track.identifier, track))
@@ -126,15 +122,10 @@ async def get_playlist(query: str, request: Request):
 @app.get("/stream/{video_id}")
 async def stream_audio(video_id: str, request: Request):
     downloader = request.app.state.downloader
+    # The new downloader always provides a local file path, so this logic is simple
     download_result = await downloader.download(video_id)
     
-    if download_result and download_result.success:
-        # If Cobalt gave us a URL, redirect the client to it
-        if download_result.is_url:
-            logger.info(f"Redirecting to Cobalt stream URL: {download_result.file_path}")
-            return RedirectResponse(url=str(download_result.file_path))
-        
-        # Otherwise, serve the local file
+    if download_result and download_result.success and download_result.file_path:
         logger.info(f"Serving local file: {download_result.file_path}")
         return FileResponse(download_result.file_path, media_type="audio/mpeg")
 

@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     MAX_CONCURRENT_DOWNLOADS: int = 3
     DOWNLOAD_TIMEOUT: int = 120
-    MAX_TRACK_DURATION_S: int = 900
+    TRACK_MAX_DURATION_S: int = 900
 
     @field_validator("COBALT_INSTANCES", "PIPED_INSTANCES", "INVIDIOUS_INSTANCES", mode="before")
     @classmethod
