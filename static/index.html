@@ -4,27 +4,191 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Aurora Retro Deck</title>
+    <!-- Инициализация Telegram WebApp -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        :root{--bg:#121212;--case:#222;--sticker:#e0e0e0;--tape:#3a3a3a;--cyan:#00f3ff;--pink:#ff0055;--gold:#ffcc00}
-        body{background-color:var(--bg);color:#333;font-family:'Courier New',monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;overflow:hidden;user-select:none}
-        .cassette{width:320px;height:200px;background:var(--case);border-radius:12px;position:relative;box-shadow:inset 0 0 30px #000,0 20px 50px rgba(0,0,0,.7),0 0 15px var(--cyan),0 0 30px var(--pink);border:3px solid #333;display:flex;flex-direction:column;align-items:center;padding:15px;transition:transform .1s}
-        .screw{position:absolute;width:10px;height:10px;background:#444;border-radius:50%;box-shadow:inset 1px 1px 2px #000}.screw::before,.screw::after{content:'';position:absolute;top:50%;left:15%;width:70%;height:1px;background:#111}.screw::before{transform:rotate(45deg)}.screw::after{transform:rotate(-45deg)}.tl{top:8px;left:8px}.tr{top:8px;right:8px}.bl{bottom:8px;left:8px}.br{bottom:8px;right:8px}
-        .label{width:100%;height:120px;background:var(--sticker);border-radius:6px;position:relative;box-shadow:0 2px 5px rgba(0,0,0,.5);display:flex;flex-direction:column;align-items:center;overflow:hidden}.label::before{content:'';position:absolute;top:15px;left:0;width:100%;height:8px;background:linear-gradient(90deg,var(--pink),var(--gold),var(--cyan));opacity:.8}
-        .viz-container{position:absolute;top:28px;display:flex;gap:2px;align-items:flex-end;height:20px;opacity:.3;transition:opacity .3s}.playing .viz-container{opacity:1}.bar{width:4px;background:var(--cyan);height:3px;animation:bounce .6s infinite ease-in-out alternate;animation-play-state:paused}.playing .bar{animation-play-state:running}@keyframes bounce{0%{height:2px}100%{height:18px;background:var(--pink)}}
-        .info{margin-top:55px;text-align:center;width:90%;z-index:2}.title{font-weight:900;font-size:16px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.artist{font-size:12px;color:#666;font-weight:700}
-        .window{width:200px;height:50px;background:rgba(20,20,20,.95);border-radius:25px;margin-top:8px;border:2px solid #999;display:flex;justify-content:space-between;align-items:center;padding:0 15px;position:relative;box-shadow:inset 0 0 10px #000}
-        .spool{width:36px;height:36px;background:#fff;border-radius:50%;border:6px solid var(--tape);position:relative;box-shadow:0 0 5px #000}.spool::after{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle,transparent 35%,#fff 36%),conic-gradient(transparent 10%,#aaa 10% 20%,transparent 20% 40%,#aaa 40% 50%,transparent 50% 70%,#aaa 70% 80%,transparent 80%);border-radius:50%;animation:spin 2s linear infinite;animation-play-state:paused}.playing .spool::after{animation-play-state:running}@keyframes spin{100%{transform:rotate(360deg)}}.bridge{width:80px;height:20px;background:#111;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
-        .main-controls{margin-top:25px;display:flex;justify-content:center;align-items:center;gap:10px;width:100%}.btn{background:#2a2a2a;border:none;color:#888;font-family:inherit;font-weight:700;font-size:16px;padding:10px;cursor:pointer;box-shadow:0 3px 0 #000;border-radius:4px;transition:.1s}.btn:active{transform:translateY(3px);box-shadow:none}.play-btn{color:var(--cyan)}.playing .play-btn{color:var(--pink);text-shadow:0 0 5px var(--pink)}
-        .search-box{margin-top:20px;display:flex;justify-content:center;width:100%}input{background:#000;border:1px solid #333;color:var(--cyan);font-family:'Courier New',monospace;padding:10px;width:100%;max-width:320px;text-transform:uppercase;outline:none;text-align:center;border-radius:4px}input::placeholder{color:#444}
-        #drawer-container{position:fixed;inset:0;z-index:100;pointer-events:none}.overlay{position:absolute;inset:0;background:rgba(0,0,0,.7);opacity:0;transition:opacity .3s}.drawer{position:absolute;bottom:0;left:0;right:0;height:70vh;background:rgba(20,20,30,.9);backdrop-filter:blur(10px);border-radius:16px 16px 0 0;transform:translateY(100%);transition:transform .3s;display:flex;flex-direction:column;padding:15px;border-top:1px solid rgba(255,255,255,.1)}#drawer-title{margin:0 0 15px;text-align:center;font-size:1.2em;color:#fff}#drawer-content{overflow-y:auto;color:#fff}.drawer-container.active{pointer-events:all}.drawer-container.active .overlay{opacity:1}.drawer-container.active .drawer{transform:translateY(0)}.menu-item,.playlist-item{padding:12px;background:rgba(0,0,0,.2);border-radius:4px;margin-bottom:8px;cursor:pointer;transition:background .2s}.menu-item:hover,.playlist-item:hover{background:rgba(255,255,255,.1)}.playlist-item.active{background:var(--pink);color:#fff}
-        #ai-modal{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:15px;padding:20px;opacity:0;pointer-events:none;transition:opacity .3s;backdrop-filter:blur(5px)}.modal.active{opacity:1;pointer-events:all}#ai-input{width:100%;max-width:300px;background:#111;border:1px solid #555;color:#fff;padding:12px;text-align:center;border-radius:4px}
+        :root {
+            --bg: #0a0a0c;
+            --case: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+            --sticker: #e8e8e8;
+            --tape: #1c1c1c;
+            --cyan: #00f3ff;
+            --pink: #ff0055;
+            --gold: #ffcc00;
+            --btn-bg: #222;
+        }
+
+        /* Общие стили и CRT-эффект на фоне */
+        body {
+            background-color: var(--bg);
+            background-image: linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+            background-size: 100% 4px;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* КАССЕТА - Улучшенный 3D дизайн */
+        .cassette {
+            width: 320px;
+            height: 200px;
+            background: var(--case);
+            border-radius: 12px;
+            position: relative;
+            box-shadow: 
+                inset 0 0 10px rgba(255,255,255,0.05),
+                0 20px 50px rgba(0,0,0,0.9),
+                0 0 20px rgba(0, 243, 255, 0.15),
+                0 0 40px rgba(255, 0, 85, 0.15);
+            border: 2px solid #3a3a3a;
+            border-bottom: 6px solid #111; /* Эффект толщины */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            transition: transform 0.2s;
+        }
+
+        /* Реалистичные винтики */
+        .screw {
+            position: absolute; width: 12px; height: 12px; background: #333;
+            border-radius: 50%; box-shadow: inset 1px 1px 3px #000, 0 1px 0 rgba(255,255,255,0.1);
+        }
+        .screw::before, .screw::after { content: ''; position: absolute; top: 50%; left: 15%; width: 70%; height: 1.5px; background: #111; }
+        .screw::before { transform: translateY(-50%) rotate(45deg); }
+        .screw::after { transform: translateY(-50%) rotate(-45deg); }
+        .tl { top: 8px; left: 8px; } .tr { top: 8px; right: 8px; }
+        .bl { bottom: 8px; left: 8px; } .br { bottom: 8px; right: 8px; }
+
+        /* Наклейка */
+        .label {
+            width: 100%; height: 120px; background: var(--sticker);
+            border-radius: 6px; position: relative; box-shadow: inset 0 0 15px rgba(0,0,0,0.1), 0 2px 5px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; align-items: center; overflow: hidden;
+        }
+        .label::before {
+            content: ''; position: absolute; top: 12px; left: 0; width: 100%; height: 6px;
+            background: linear-gradient(90deg, var(--pink), var(--gold), var(--cyan));
+        }
+
+        /* Эквалайзер */
+        .viz-container {
+            position: absolute; top: 25px; display: flex; gap: 3px; align-items: flex-end;
+            height: 20px; opacity: 0.2; transition: opacity 0.3s;
+        }
+        .playing .viz-container { opacity: 1; }
+        .bar {
+            width: 5px; background: var(--cyan); height: 3px; border-radius: 1px;
+            animation: bounce 0.6s infinite ease-in-out alternate; animation-play-state: paused;
+            box-shadow: 0 0 5px var(--cyan);
+        }
+        .playing .bar { animation-play-state: running; }
+        @keyframes bounce { 0% { height: 2px; background: var(--cyan); } 100% { height: 18px; background: var(--pink); box-shadow: 0 0 5px var(--pink); } }
+
+        /* Инфо о треке */
+        .info { margin-top: 55px; text-align: center; width: 90%; z-index: 2; color: #111; }
+        .title { font-weight: 900; font-size: 16px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.5px; }
+        .artist { font-size: 13px; color: #444; font-weight: 700; margin-top: 2px; }
+
+        /* Окошко с пленкой */
+        .window {
+            width: 210px; height: 45px; background: rgba(10,10,10,0.95);
+            border-radius: 6px; margin-top: 8px; border: 2px solid #999;
+            border-top: 3px solid #555; border-bottom: 2px solid #ccc;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 20px; position: relative; box-shadow: inset 0 5px 15px #000;
+        }
+        .spool {
+            width: 32px; height: 32px; background: #fff; border-radius: 50%;
+            border: 4px solid var(--tape); position: relative; box-shadow: 0 0 5px #000;
+        }
+        .spool::after {
+            content: ''; position: absolute; inset: 0;
+            background: radial-gradient(circle, transparent 35%, #fff 36%), conic-gradient(transparent 10%, #aaa 10% 20%, transparent 20% 40%, #aaa 40% 50%, transparent 50% 70%, #aaa 70% 80%, transparent 80%);
+            border-radius: 50%; animation: spin 2.5s linear infinite; animation-play-state: paused;
+        }
+        .playing .spool::after { animation-play-state: running; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        /* Пленка по центру */
+        .bridge { width: 90px; height: 16px; background: #1a1a1a; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 2px; }
+
+        /* ОЖИВЛЕННЫЙ ПРОГРЕСС-БАР */
+        .progress-wrapper { width: 100%; max-width: 320px; height: 6px; background: #222; border-radius: 3px; margin-top: 20px; overflow: hidden; border: 1px solid #333; }
+        .progress-fill { width: 0%; height: 100%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); transition: width 0.1s linear; }
+
+        /* Механические кнопки */
+        .main-controls { margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; }
+        .btn {
+            background: var(--btn-bg); border: 2px solid #111; color: #aaa; font-family: 'Courier New', monospace;
+            font-weight: 900; font-size: 16px; padding: 12px 14px; cursor: pointer;
+            box-shadow: 0 4px 0 #000, 0 5px 5px rgba(0,0,0,0.5); border-radius: 6px; transition: all 0.1s;
+        }
+        .btn:active { transform: translateY(4px); box-shadow: 0 0 0 #000, inset 0 2px 5px rgba(0,0,0,0.5); color: #fff; }
+        .play-btn { color: var(--cyan); border-color: #004444; }
+        .playing .play-btn { color: var(--pink); border-color: #440011; text-shadow: 0 0 8px var(--pink); box-shadow: 0 4px 0 #000, 0 0 15px rgba(255,0,85,0.3); }
+
+        /* Поиск */
+        .search-box { margin-top: 20px; display: flex; justify-content: center; width: 100%; padding: 0 20px; }
+        input {
+            background: #000; border: 2px solid #333; color: var(--cyan); font-family: 'Courier New', monospace; font-weight: bold;
+            padding: 12px; width: 100%; max-width: 320px; text-transform: uppercase; outline: none; text-align: center;
+            border-radius: 6px; box-shadow: inset 0 0 10px rgba(0,243,255,0.1); transition: border-color 0.3s;
+        }
+        input:focus { border-color: var(--cyan); }
+        input::placeholder { color: #555; font-weight: normal; }
+
+        /* Drawers & Modals (Меню) */
+        #drawer-container { position: fixed; inset: 0; z-index: 100; pointer-events: none; }
+        .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(3px); opacity: 0; transition: opacity 0.3s; }
+        .drawer {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 70vh;
+            background: rgba(15,15,18,0.95); border-radius: 20px 20px 0 0;
+            transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 1, 0.5, 1);
+            display: flex; flex-direction: column; padding: 20px;
+            border-top: 2px solid var(--cyan); box-shadow: 0 -10px 40px rgba(0,243,255,0.1);
+        }
+        #drawer-title { margin: 0 0 15px; text-align: center; font-size: 1.2em; color: var(--cyan); text-shadow: 0 0 5px var(--cyan); text-transform: uppercase; }
+        #drawer-content { overflow-y: auto; color: #fff; padding-bottom: 20px; }
+        
+        .drawer-container.active { pointer-events: all; }
+        .drawer-container.active .overlay { opacity: 1; }
+        .drawer-container.active .drawer { transform: translateY(0); }
+        
+        .menu-item, .playlist-item {
+            padding: 14px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 10px;
+            cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent;
+        }
+        .menu-item:hover, .playlist-item:hover { background: rgba(255,255,255,0.1); border-left-color: var(--cyan); }
+        .playlist-item.active { background: rgba(255,0,85,0.15); border-left-color: var(--pink); color: var(--pink); font-weight: bold; }
+
+        #ai-modal {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 15px;
+            padding: 20px; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(5px);
+        }
+        #ai-modal.active { opacity: 1; pointer-events: all; }
     </style>
 </head>
 <body>
+
+    <!-- Кассета -->
     <div class="cassette" id="deck">
         <div class="screw tl"></div><div class="screw tr"></div><div class="screw bl"></div><div class="screw br"></div>
         <div class="label">
-            <div class="viz-container"><div class="bar" style="animation-duration:.4s"></div><div class="bar" style="animation-duration:.5s"></div><div class="bar" style="animation-duration:.3s"></div><div class="bar" style="animation-duration:.6s"></div><div class="bar" style="animation-duration:.4s"></div><div class="bar" style="animation-duration:.5s"></div><div class="bar" style="animation-duration:.3s"></div><div class="bar" style="animation-duration:.4s"></div></div>
+            <div class="viz-container">
+                <div class="bar" style="animation-duration:.4s"></div><div class="bar" style="animation-duration:.5s"></div>
+                <div class="bar" style="animation-duration:.3s"></div><div class="bar" style="animation-duration:.6s"></div>
+                <div class="bar" style="animation-duration:.4s"></div><div class="bar" style="animation-duration:.5s"></div>
+                <div class="bar" style="animation-duration:.3s"></div><div class="bar" style="animation-duration:.4s"></div>
+            </div>
             <div class="info">
                 <div class="title" id="title">NO TAPE</div>
                 <div class="artist" id="artist">INSERT CASSETTE</div>
@@ -32,6 +196,13 @@
             <div class="window"><div class="spool"></div><div class="bridge"></div><div class="spool"></div></div>
         </div>
     </div>
+
+    <!-- Новая полоса прогресса -->
+    <div class="progress-wrapper">
+        <div class="progress-fill" id="progress-fill"></div>
+    </div>
+
+    <!-- Кнопки -->
     <div class="main-controls">
         <button class="btn" onclick="app.prev()">◀◀</button>
         <button class="btn play-btn" id="playBtn" onclick="app.toggle()">PLAY</button>
@@ -40,13 +211,241 @@
         <button class="btn" onclick="app.ui.toggleDrawer('genres')">♪</button>
         <button class="btn" onclick="app.ui.toggleAIModal(true)">🤖</button>
     </div>
-    <div class="search-box"><input type="text" id="query" placeholder="SEARCH OR USE AI..." onkeypress="if(event.key==='Enter')app.search()"></div>
 
-    <div id="drawer-container"><div class="overlay"></div><div id="drawer" class="drawer"><h3 id="drawer-title"></h3><div id="drawer-content"></div></div></div>
-    <div id="ai-modal" class="modal"><input id="ai-input" placeholder="Что включить?"><button class="btn" onclick="app.askAI()">Пуск</button><button class="btn" onclick="app.ui.toggleAIModal(false)">Отмена</button></div>
+    <div class="search-box">
+        <input type="text" id="query" placeholder="SEARCH OR USE AI..." onkeypress="if(event.key==='Enter')app.search()">
+    </div>
 
+    <!-- Меню и Модалки -->
+    <div id="drawer-container" class="drawer-container">
+        <div class="overlay" id="overlay-bg"></div>
+        <div id="drawer" class="drawer">
+            <h3 id="drawer-title"></h3>
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+
+    <div id="ai-modal" class="modal">
+        <h3 style="color:var(--cyan); margin-bottom: 0;">AI DJ PROMPT</h3>
+        <input id="ai-input" placeholder="Что включить?">
+        <div style="display:flex; gap:10px;">
+            <button class="btn play-btn" onclick="app.askAI()">EXECUTE</button>
+            <button class="btn" onclick="app.ui.toggleAIModal(false)">CANCEL</button>
+        </div>
+    </div>
+
+    <!-- Деобфусцированный и исправленный JavaScript -->
     <script>
-        const app={store:{_s:{p:[],ci:-1},_l:{},sub(e,t){this._l[e]=this._l[e]||[];this._l[e].push(t)},_n(e,t){this._l[e]&&this._l[e].forEach(e=>e(t))},set(e){Object.assign(this._s,e);e.p&&this._n("p",this._s.p);void 0!==e.ci&&this._n("t",this._s.p[this._s.ci])}},api:{_b:window.location.origin,async _f(e){const t=await fetch(`${this._b}${e}`);if(!t.ok)throw new Error(`HTTP ${t.status}`);return t.json()},search:e=>app.api._f(`/api/player/playlist?query=${encodeURIComponent(e)}`),askAI:e=>app.api._f(`/api/ai/dj?prompt=${encodeURIComponent(e)}`)},player:{audio:new Audio,init(){this.audio.addEventListener("ended",()=>this.next()),this.audio.addEventListener("timeupdate",()=>app.ui.updateProgress(this.audio.currentTime,this.audio.duration)),this.audio.addEventListener("play",()=>app.ui.setPlayState(!0)),this.audio.addEventListener("pause",()=>app.ui.setPlayState(!1)),this.audio.addEventListener("error",()=>app.ui.showError("TAPE ERROR"))},play(e){if(!e)return;app.ui.updateTrackInfo(e),this.audio.src=`${app.api._b}/stream/${e.identifier}`,this.audio.play()},toggle(){this.audio.src&& (this.audio.paused?this.audio.play():this.audio.pause())},next(){let e=app.store._s.ci+1;e>=app.store._s.p.length&&(e=0),app.store.set({ci:e}),this.play(app.store._s.p[e])},prev(){this.audio.currentTime>3?this.audio.currentTime=0:(()=>{let e=app.store._s.ci-1;e<0&&(e=app.store._s.p.length-1),app.store.set({ci:e}),this.play(app.store._s.p[e])})()}},ui:{get:e=>document.getElementById(e),_dr:null,setPlayState(e){this.get("deck").classList.toggle("playing",e),this.get("playBtn").innerText=e?"STOP":"PLAY"},updateTrackInfo(e){e&&(this.get("title").innerText=e.title,this.get("artist").innerText=e.artist)},showError(e){this.get("title").innerText=e,this.setPlayState(!1)},updateProgress(e,t){},toggleDrawer(e){const t=this.get("drawer-container");this._dr&&this._dr===e?this._dr=null:this._dr=e,this._dr?(t.classList.add("active"),this.get("drawer-title").textContent="playlist"===this._dr?"Плейлист":"Жанры",this.renderDrawer()):t.classList.remove("active")},renderDrawer(){const e=this.get("drawer-content");e.innerHTML="","playlist"===this._dr?app.store._s.p.forEach((t,i)=>{const s=document.createElement("div");s.className="playlist-item",i===app.store._s.ci&&(s.className+=" active"),s.textContent=`${t.title} - ${t.artist}`,s.onclick=()=>{app.store.set({ci:i}),app.player.play(t),this.toggleDrawer()},e.appendChild(s)}):"genres"===this._dr&&app.genres.forEach(t=>{const i=document.createElement("div");i.className="menu-item",i.textContent=t.n,i.onclick=()=>{app.search(t.q),this.toggleDrawer()},e.appendChild(i)})},toggleAIModal(e){this.get("ai-modal").classList.toggle("active",e)}},genres:[{n:"🌍 Hits",q:"top pop hits 2024"},{n:"🎸 Rock",q:"classic rock 70s"},{n:"🎧 Phonk",q:"drift phonk mix"},{n:"🇷🇺 Russian",q:"русские хиты 2024"},{n:"✨ Mood",q:"deep focus music"},{n:"🎲 Random",q:"top hits"}],async search(e){const t=e||this.ui.get("query").value;if(!t)return;this.ui.get("title").innerText="SEARCHING...",this.ui.get("artist").innerText="PLEASE WAIT";try{const e=await this.api.search(t);e.playlist?.length?(this.store.set({p:e.playlist,ci:0}),this.player.play(e.playlist[0])):this.ui.showError("NOT FOUND")}catch{this.ui.showError("NET ERROR")}},async askAI(){const e=this.ui.get("ai-input").value;if(!e)return;this.ui.toggleAIModal(!1),this.ui.get("title").innerText="AI THINKING...",this.ui.get("artist").innerText="PLEASE WAIT";try{const t=await this.api.askAI(e);t.playlist?.length?(this.store.set({p:t.playlist,ci:0}),this.player.play(t.playlist[0])):this.ui.showError("AI NOT FOUND")}catch{this.ui.showError("AI ERROR")}},init(){this.player.init(),this.store.sub("t",e=>this.ui.updateTrackInfo(e)),this.store.sub("p",e=>this.ui._dr&&this.ui.renderDrawer()),this.ui.get("overlay").onclick=()=>this.ui.toggleDrawer()}};document.addEventListener("DOMContentLoaded",()=>app.init());
+        // Инициализация Telegram WebApp
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.expand();
+            window.Telegram.WebApp.ready();
+        }
+
+        const app = {
+            store: {
+                _s: { p: [], ci: -1 },
+                _l: {},
+                sub(event, callback) {
+                    this._l[event] = this._l[event] || [];
+                    this._l[event].push(callback);
+                },
+                _n(event, data) {
+                    if (this._l[event]) this._l[event].forEach(cb => cb(data));
+                },
+                set(newState) {
+                    Object.assign(this._s, newState);
+                    if (newState.p) this._n("p", this._s.p);
+                    if (newState.ci !== undefined) this._n("t", this._s.p[this._s.ci]);
+                }
+            },
+            
+            api: {
+                _b: window.location.origin,
+                async _f(endpoint) {
+                    const res = await fetch(`${this._b}${endpoint}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                },
+                search: (q) => app.api._f(`/api/player/playlist?query=${encodeURIComponent(q)}`),
+                askAI: (q) => app.api._f(`/api/ai/dj?prompt=${encodeURIComponent(q)}`)
+            },
+            
+            player: {
+                audio: new Audio(),
+                init() {
+                    this.audio.addEventListener("ended", () => this.next());
+                    this.audio.addEventListener("timeupdate", () => app.ui.updateProgress(this.audio.currentTime, this.audio.duration));
+                    this.audio.addEventListener("play", () => app.ui.setPlayState(true));
+                    this.audio.addEventListener("pause", () => app.ui.setPlayState(false));
+                    this.audio.addEventListener("error", () => app.ui.showError("TAPE ERROR"));
+                },
+                play(track) {
+                    if (!track) return;
+                    app.ui.updateTrackInfo(track);
+                    this.audio.src = `${app.api._b}/stream/${track.identifier}`;
+                    this.audio.play();
+                },
+                toggle() {
+                    if (this.audio.src) {
+                        this.audio.paused ? this.audio.play() : this.audio.pause();
+                    }
+                },
+                next() {
+                    if (app.store._s.p.length === 0) return;
+                    let i = app.store._s.ci + 1;
+                    if (i >= app.store._s.p.length) i = 0;
+                    app.store.set({ ci: i });
+                    this.play(app.store._s.p[i]);
+                },
+                prev() {
+                    if (this.audio.currentTime > 3) {
+                        this.audio.currentTime = 0;
+                    } else {
+                        let i = app.store._s.ci - 1;
+                        if (i < 0) i = app.store._s.p.length - 1;
+                        app.store.set({ ci: i });
+                        this.play(app.store._s.p[i]);
+                    }
+                }
+            },
+            
+            ui: {
+                get: (id) => document.getElementById(id),
+                _dr: null,
+                setPlayState(isPlaying) {
+                    this.get("deck").classList.toggle("playing", isPlaying);
+                    this.get("playBtn").innerText = isPlaying ? "STOP" : "PLAY";
+                },
+                updateTrackInfo(track) {
+                    if (track) {
+                        this.get("title").innerText = track.title || "UNKNOWN TITLE";
+                        this.get("artist").innerText = track.artist || track.uploader || "UNKNOWN ARTIST";
+                    }
+                },
+                showError(msg) {
+                    this.get("title").innerText = msg;
+                    this.setPlayState(false);
+                },
+                updateProgress(current, total) {
+                    // ОЖИВЛЕННАЯ ФУНКЦИЯ ПРОГРЕССА
+                    if (total > 0) {
+                        const percent = (current / total) * 100;
+                        this.get("progress-fill").style.width = `${percent}%`;
+                    }
+                },
+                toggleDrawer(drawerType) {
+                    const container = this.get("drawer-container");
+                    if (this._dr && this._dr === drawerType) {
+                        this._dr = null; // Close if same
+                    } else {
+                        this._dr = drawerType; // Open new
+                    }
+                    
+                    if (this._dr) {
+                        container.classList.add("active");
+                        this.get("drawer-title").textContent = this._dr === "playlist" ? "TAPE TRACKS" : "RADIO GENRES";
+                        this.renderDrawer();
+                    } else {
+                        container.classList.remove("active");
+                    }
+                },
+                renderDrawer() {
+                    const content = this.get("drawer-content");
+                    content.innerHTML = "";
+                    
+                    if (this._dr === "playlist") {
+                        if (app.store._s.p.length === 0) content.innerHTML = "<div style='text-align:center;color:#666'>TAPE IS EMPTY</div>";
+                        app.store._s.p.forEach((track, i) => {
+                            const div = document.createElement("div");
+                            div.className = "playlist-item" + (i === app.store._s.ci ? " active" : "");
+                            div.textContent = `${track.title} - ${track.artist || track.uploader}`;
+                            div.onclick = () => {
+                                app.store.set({ ci: i });
+                                app.player.play(track);
+                                this.toggleDrawer(); // Close drawer
+                            };
+                            content.appendChild(div);
+                        });
+                    } else if (this._dr === "genres") {
+                        app.genres.forEach(genre => {
+                            const div = document.createElement("div");
+                            div.className = "menu-item";
+                            div.textContent = genre.n;
+                            div.onclick = () => {
+                                app.search(genre.q);
+                                this.toggleDrawer();
+                            };
+                            content.appendChild(div);
+                        });
+                    }
+                },
+                toggleAIModal(show) {
+                    this.get("ai-modal").classList.toggle("active", show);
+                }
+            },
+            
+            genres: [
+                { n: "🌍 Global Hits", q: "top pop hits 2024" },
+                { n: "🎸 Classic Rock", q: "classic rock 70s" },
+                { n: "🎧 Drift Phonk", q: "drift phonk mix" },
+                { n: "🇷🇺 Russian Pop", q: "русские хиты 2024" },
+                { n: "✨ Deep Focus", q: "deep focus music" },
+                { n: "🎲 Random Mix", q: "top hits mix" }
+            ],
+            
+            async search(queryStr) {
+                const q = queryStr || this.ui.get("query").value;
+                if (!q) return;
+                
+                this.ui.get("title").innerText = "SEARCHING...";
+                this.ui.get("artist").innerText = "PLEASE WAIT";
+                
+                try {
+                    const res = await this.api.search(q);
+                    if (res.playlist && res.playlist.length > 0) {
+                        this.store.set({ p: res.playlist, ci: 0 });
+                        this.player.play(res.playlist[0]);
+                    } else {
+                        this.ui.showError("NOT FOUND");
+                    }
+                } catch (e) {
+                    this.ui.showError("NET ERROR");
+                }
+            },
+            
+            async askAI() {
+                const q = this.ui.get("ai-input").value;
+                if (!q) return;
+                
+                this.ui.toggleAIModal(false);
+                this.ui.get("title").innerText = "AI THINKING...";
+                this.ui.get("artist").innerText = "PLEASE WAIT";
+                
+                try {
+                    const res = await this.api.askAI(q);
+                    if (res.playlist && res.playlist.length > 0) {
+                        this.store.set({ p: res.playlist, ci: 0 });
+                        this.player.play(res.playlist[0]);
+                    } else {
+                        this.ui.showError("AI NOT FOUND");
+                    }
+                } catch (e) {
+                    this.ui.showError("AI ERROR");
+                }
+            },
+            
+            init() {
+                this.player.init();
+                // Subscriptions
+                this.store.sub("t", track => this.ui.updateTrackInfo(track));
+                this.store.sub("p", () => { if (this.ui._dr) this.ui.renderDrawer(); });
+                // Исправлен баг с кликом по оверлею
+                this.ui.get("overlay-bg").onclick = () => this.ui.toggleDrawer();
+            }
+        };
+
+        document.addEventListener("DOMContentLoaded", () => app.init());
     </script>
 </body>
 </html>
