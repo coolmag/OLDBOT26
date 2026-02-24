@@ -182,6 +182,7 @@ class YouTubeDownloader:
         
         # ⚠️ АКТУАЛЬНАЯ КОНФИГУРАЦИЯ YT-DLP (ФЕВРАЛЬ 2026)
         opts = {
+            'username': 'oauth2',  # <--- ВКЛЮЧАЕМ OAUTH2 АВТОРИЗАЦИЮ
             'format': 'bestaudio/best', 
             'outtmpl': temp_path, 
             'quiet': True, 
@@ -201,6 +202,7 @@ class YouTubeDownloader:
         
         # OMITTING COOKIES: The 'ios' and 'tv' clients do not support cookies
         # and providing them seems to cause a "page needs to be reloaded" error.
+        # OAuth2 is the preferred method now.
         # if self._settings.COOKIES_FILE.exists():
         #     opts['cookiefile'] = str(self._settings.COOKIES_FILE)
             
