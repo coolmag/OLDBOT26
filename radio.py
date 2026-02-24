@@ -121,7 +121,7 @@ class RadioSession:
             if not self.is_running: break
             try:
                 # Ищем сразу 20-30 треков
-                tracks = await self.downloader.search(q, decade=self.decade, limit=20)
+                tracks = await self.downloader.search(q, limit=20)
                 if not tracks: continue
 
                 # Фильтруем то, что уже играло

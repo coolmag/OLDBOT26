@@ -63,11 +63,14 @@ class ProxyManager:
                 await asyncio.sleep(3) # Ждем поднятия туннеля
                 if getattr(temp_proxy, 'socks_proxy_url', None):
                     url = temp_proxy.socks_proxy_url
-                    if (await self._test_proxy_connection(url))[0]:
+                    is_ok, error_reason = await self._test_proxy_connection(url)
+                    if is_ok:
                         self._active_proxy = temp_proxy
                         self._active_proxy_url = url
                         logger.info(f"✅ V2Ray Proxy UP: {url}")
                         return
+                    else:
+                        logger.warning(f"Proxy {url} failed health check: {error_reason}")
                 temp_proxy.stop()
             except Exception as e:
                 logger.error(f"Failed to start proxy node: {e}")
