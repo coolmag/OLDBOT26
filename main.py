@@ -99,6 +99,35 @@ async def telegram_webhook(request: Request):
         logger.error(f"Webhook processing error: {e}", exc_info=True)
     return {"ok": True}
 
+@app.get("/api/ai/dj")
+async def api_ai_dj(prompt: str, request: Request):
+    """Эндпоинт для ИИ-диджея в веб-плеере"""
+    chat_manager = request.app.state.chat_manager
+    ai_manager = request.app.state.tg_app.ai_manager
+    downloader = request.app.state.downloader
+    
+    # 1. Получаем разговорный ответ ИИ (с шутками и стилем персоны)
+    # Используем chat_id = 0 для веб-плеера (чтобы бралась дефолтная персона или последняя установленная)
+    ai_message = await chat_manager.get_response(0, prompt, "Слушатель")
+    
+    # 2. Анализируем, что именно нужно найти
+    analysis = await ai_manager.analyze_message(prompt)
+    query = analysis.get("query") or prompt
+    
+    # 3. Ищем треки
+    tracks = await downloader.search(query=query, limit=15)
+    if tracks:
+        for track in tracks[:3]:
+            asyncio.create_task(downloader.download(track.identifier, track))
+            
+    # Возвращаем и плейлист, и текст для озвучки!
+    return {"playlist": tracks, "message": ai_message}
+
+# Глушилка для favicon, чтобы не засорять логи 404 ошибкой
+@app.get("/favicon.ico")
+async def favicon():
+    return JSONResponse(status_code=200, content={"status": "ok"})
+
 @app.get("/api/player/playlist")
 async def get_playlist(query: str, request: Request):
     downloader = request.app.state.downloader
