@@ -45,33 +45,47 @@ async def _do_spotify_play(chat_id: int, spotify_url: str, context: ContextTypes
 
 
 async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE):
-    msg = await context.bot.send_message(chat_id, f"🔎 Ищу: *{query[:100]}*...", parse_mode=ParseMode.MARKDOWN, disable_notification=True)
+    msg = await context.bot.send_message(
+        chat_id, f"🔎 Ищу: *{query[:100]}*...",
+        parse_mode=ParseMode.MARKDOWN, disable_notification=True
+    )
+
     downloader = context.application.downloader
     tracks = await downloader.search(query, limit=1)
+
     if tracks:
-        await msg.delete()
         dl_res = await downloader.download(tracks[0].identifier, tracks[0])
+
         if dl_res.success and dl_res.file_path:
+            await msg.delete() # Удаляем только если скачали успешно
             try:
                 info = dl_res.track_info
+                
                 # 🎛 ФОРМИРУЕМ КНОПКУ ПЛЕЕРА ДЛЯ /PLAY
                 settings = context.application.settings
                 player_url = getattr(settings, 'PLAYER_URL', getattr(settings, 'BASE_URL', ''))
+                
                 markup = None
                 if player_url:
+                    # Убеждаемся, что URL начинается с https:// (обязательно для WebApp)
+                    if not player_url.startswith('http'):
+                        player_url = f"https://{player_url}"
                     markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]])
-
+                
                 with open(dl_res.file_path, 'rb') as f:
                     await context.bot.send_audio(
-                        chat_id=chat_id, audio=f, 
-                        title=info.title, performer=info.artist, duration=info.duration, 
-                        thumbnail=info.thumbnail_url,
-                        reply_markup=markup # Отправляем кнопку вместе с треком
+                        chat_id=chat_id, audio=f,
+                        title=info.title if info else "Track", 
+                        performer=info.artist if info else "Unknown", 
+                        duration=info.duration if info else 0,
+                        thumbnail=info.thumbnail_url if info else None,
+                        reply_markup=markup # Явно передаем разметку с кнопкой
                     )
             except Exception as e:
                 logger.error(f"Error sending audio: {e}", exc_info=True)
+                await context.bot.send_message(chat_id, "❌ Ошибка при отправке файла.")
         else:
-             await context.bot.send_message(chat_id, f"😕 Не удалось скачать трек: {dl_res.error_message or 'Неизвестная ошибка'}")
+             await msg.edit_text(f"😕 Не удалось скачать трек: {dl_res.error_message or 'Неизвестная ошибка'}")
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
@@ -151,7 +165,6 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
 
-    # Проверяем админа гибко (и список, и просто строку)
     is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
 
     if not is_admin:
@@ -166,12 +179,26 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_manager = context.application.chat_manager
     current_mode = chat_manager.get_mode(chat_id)
     
+    # ИСПРАВЛЕНА ОШИБКА TYPEERROR
+    # В ai_personas.py ключи это 'default', 'toxic' и тд. Значения - это строки промптов.
+    # Поэтому мы используем сами ключи (mode) для названий кнопок на клавиатуре.
+    
+    mode_names = {
+        "default": "Эстет",
+        "standup": "Комик",
+        "expert": "Эксперт",
+        "gop": "Гопник",
+        "toxic": "Токсик",
+        "chill": "Чилл"
+    }
+    
     text = f"🤖 Режим AI: *{current_mode.upper()}*\nВыберите личность:"
     keyboard = [
-        [InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{p['name']}", callback_data=f"set_mode|{mode}")]
-        for mode, p in PERSONAS.items()
+        [InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{mode_names.get(mode, mode)}", callback_data=f"set_mode|{mode}")]
+        for mode in PERSONAS.keys()
     ]
     keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="close_admin")])
+    
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -212,6 +239,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         greeting = random.choice(GREETINGS.get(mode, ["Привет!"]))
         await context.bot.send_message(update.effective_chat.id, greeting)
         await query.delete_message()
+
 
 def setup_handlers(app: Application):
     """Registers all handlers with the application."""
