@@ -186,7 +186,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def radio_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _do_radio(update.effective_chat.id, " ".join(context.args), context)
+    await _do_radio(update.effective_chat.id, " ".join(context.args), context, update)
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
