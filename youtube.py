@@ -179,22 +179,44 @@ class YouTubeDownloader:
 
     async def _download_yt_local(self, video_id: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_temp")
-        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path, 'quiet': True, 'noprogress': True, 'nocheckcertificate': True, 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}]}
+        
+        # ⚠️ АКТУАЛЬНАЯ КОНФИГУРАЦИЯ YT-DLP (ФЕВРАЛЬ 2026)
+        opts = {
+            'format': 'bestaudio/best', 
+            'outtmpl': temp_path, 
+            'quiet': True, 
+            'noprogress': True,
+            'nocheckcertificate': True,
+            # Обходим PO Token, используя API клиентов, где он не требуется
+            'extractor_args': {
+                'youtube': {
+                    # Эмулируем iOS, TV и встроенный плеер. Исключаем WEB и ANDROID.
+                    'player_client': ['ios', 'tv', 'web_embedded'],
+                    # Отключаем попытки решить JS челленджи, которые все равно упадут
+                    'player_skip': ['webpage', 'configs', 'js'] 
+                }
+            },
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
+        }
+        
         if self._settings.COOKIES_FILE.exists():
             opts['cookiefile'] = str(self._settings.COOKIES_FILE)
+            
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"https://music.youtube.com/watch?v={video_id}"))
+            
             paths = [Path(temp_path + ".mp3"), Path(temp_path)]
             for p in paths:
                 if p.exists() and p.stat().st_size > 10000:
                     if p != target_path: 
-                        if target_path.exists(): target_path.unlink(missing_ok=True)
+                        if target_path.exists(): target_path.unlink()
                         p.rename(target_path)
-                    logger.info(f"✅ Success via local yt-dlp")
+                    logger.info(f"✅ Success via local yt-dlp (Bypassed PO Token)")
                     return DownloadResult(success=True, file_path=target_path)
-        except Exception as e:
+        except Exception as e: 
             logger.warning(f"Local yt-dlp failed: {e}")
+            
         return DownloadResult(success=False)
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
