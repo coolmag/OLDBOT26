@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 from typing import Optional
 import httpx
 from google import genai
@@ -9,36 +10,43 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (DI Ready).
-    Accepts settings via constructor.
+    🧠 AI Manager (Умный захват ключей).
     """
-    
     def __init__(self, settings: Settings):
         self.settings = settings
         self.providers = []
         
-        if self.settings.OPENROUTER_API_KEY:
+        # ⚠️ АГРЕССИВНЫЙ ПОИСК КЛЮЧЕЙ (Берем из настроек или напрямую из окружения Railway)
+        gemini_key = getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        openrouter_key = getattr(self.settings, 'OPENROUTER_API_KEY', '') or os.getenv("OPENROUTER_API_KEY")
+        
+        if openrouter_key:
+            self.settings.OPENROUTER_API_KEY = openrouter_key
             self.providers.append("OpenRouter")
             
-        if self.settings.GOOGLE_API_KEY:
+        if gemini_key:
             try:
-                self.gemini_client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
+                self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("Gemini")
                 logger.info("✅ Gemini Client configured successfully.")
             except Exception as e:
-                logger.error(f"Failed to configure Gemini Client: {e}")
+                logger.error(f"❌ Failed to configure Gemini Client: {e}")
+                
+        if not self.providers:
+            logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: Ключи ИИ не найдены! Бот работает как обычный скрипт.")
 
     async def analyze_message(self, text: str) -> dict:
         prompt = f"""
-        Analyze this user message for a music bot.
+        Analyze this user message for a Telegram music bot.
         Message: "{text}"
         
-        Return ONLY a JSON object (no markdown, no preamble) with:
-        1. "intent": can be "radio", "search", or "chat".
-        2. "query": a clean search term or genre for "search" and "radio", or null for "chat".
-        Example for radio: {{"intent": "radio", "query": "90s rock"}}
-        Example for search: {{"intent": "search", "query": "Daft Punk - Around the world"}}
-        Example for chat: {{"intent": "chat", "query": null}}
+        Intent rules:
+        - "radio": user wants to listen to a stream, genre, mood, or random music.
+        - "search": user wants a specific song or artist.
+        - "chat": user is just greeting, asking questions, or making conversation.
+        
+        Return ONLY a valid JSON object:
+        {{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
         """
 
         if "OpenRouter" in self.providers:
@@ -64,12 +72,11 @@ class AIManager:
             return None
 
     async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
-        # Prioritize free models
         free_models = ["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.2-3b-instruct:free"]
         headers = {
             "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://aurora-player.cloud" # Mock referer
+            "HTTP-Referer": "https://aurora-player.cloud"
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
             for model in free_models:
@@ -79,53 +86,38 @@ class AIManager:
                     if resp.status_code == 200:
                         logger.info(f"🧠 OpenRouter/{model} (JSON) responded.")
                         return self._parse_json(resp.json()['choices'][0]['message']['content'])
-                except Exception:
-                    continue # Try next model
-        logger.warning(" OpenRouter failed for all free models (JSON).")
+                except Exception: continue
         return None
 
     def _regex_fallback(self, text: str) -> dict:
         logger.warning("⚠️ AI analysis failed. Using Regex Fallback.")
         text_lower = text.lower()
-        radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'radio', 'wave', 'mix', 'playlist', 'play', 'играй', 'включи']
         
-        # More specific check for radio
-        if any(k in text_lower for k in radio_keywords):
-            # Remove keywords to find the genre
-            query = text
-            for k in radio_keywords:
-                query = query.lower().replace(k, '')
-            query = query.strip()
-            # If after cleaning nothing is left, use a default genre
-            return {"intent": "radio", "query": query or "top hits"}
+        # Улучшенный Fallback: теперь понимает базовые чат-фразы
+        chat_keywords = ['привет', 'как дела', 'что делаешь', 'аврора', 'бот', 'кто ты', 'на связи']
+        if any(k in text_lower for k in chat_keywords) and len(text.split()) < 6:
+            return {"intent": "chat", "query": None}
             
-        # Default to search if no radio keywords
+        radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'radio', 'wave', 'mix', 'playlist', 'включи', 'поставь']
+        if any(k in text_lower for k in radio_keywords):
+            query = text
+            for k in radio_keywords: query = query.lower().replace(k, '')
+            return {"intent": "radio", "query": query.strip() or "top hits"}
+            
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        """Generates a conversational response."""
-        
-        # 1. Try OpenRouter
         if "OpenRouter" in self.providers:
             try:
-                headers = {
-                    "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://aurora-player.cloud"
-                }
-                payload = {
-                    "model": "google/gemini-2.0-flash-exp:free",
-                    "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
-                }
+                headers = {"Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}", "Content-Type": "application/json", "HTTP-Referer": "https://aurora-player.cloud"}
+                payload = {"model": "google/gemini-2.0-flash-exp:free", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]}
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
                     if resp.status_code == 200:
                         logger.info("💬 OpenRouter (Chat) responded.")
                         return resp.json()['choices'][0]['message']['content']
-            except Exception as e:
-                logger.warning(f"OpenRouter chat failed: {e}")
+            except Exception as e: logger.warning(f"OpenRouter chat failed: {e}")
 
-        # 2. Fallback to Gemini
         if "Gemini" in self.providers:
             try:
                 full_prompt = f"{system_prompt}\n\nUser: {prompt}"
@@ -138,17 +130,12 @@ class AIManager:
             except Exception as e:
                 logger.error(f"❌ Gemini chat failed: {e}")
             
-        return "Извини, я сейчас немного занят музыкой, давай поболтаем позже! 🎧"
+        return "Извини, мои нейромодули обесточены. Проверь API-ключ Gemini! 🔌"
 
     def _parse_json(self, text: str) -> Optional[dict]:
         try:
-            # Most robust way to find JSON within a string
             start = text.find('{')
             end = text.rfind('}') + 1
             if start == -1 or end == 0: return None
-            
-            json_str = text[start:end]
-            return json.loads(json_str)
-        except (json.JSONDecodeError, TypeError):
-            logger.error(f"Failed to parse JSON from AI response: '{text}'")
-            return None
+            return json.loads(text[start:end])
+        except (json.JSONDecodeError, TypeError): return None
