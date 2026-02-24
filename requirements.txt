@@ -15,5 +15,3 @@ spotipy
 ffmpeg-python
 brotli
 pycryptodomex
-python-v2ray
-v2ray2proxy

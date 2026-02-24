@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Union
 from pathlib import Path
 from enum import Enum
 
@@ -50,7 +50,8 @@ class TrackInfo:
 @dataclass
 class DownloadResult:
     success: bool
-    file_path: Optional[Path] = None
-    file_id: Optional[str] = None # Telegram file_id
+    file_path: Optional[Union[Path, str]] = None
+    is_url: bool = False  # Flag to indicate if file_path is a URL
+    file_id: Optional[str] = None  # Telegram file_id
     track_info: Optional[TrackInfo] = None
     error_message: Optional[str] = None

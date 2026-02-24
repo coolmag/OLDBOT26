@@ -26,7 +26,7 @@ def format_duration(seconds: int) -> str:
 def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     icon = random.choice(["🎧", "🎵", "🎶", "📻", "💿"])
     title = track.title[:40].strip()
-    artist = track.author[:30].strip() # Fix: author instead of artist/uploader
+    artist = track.artist[:30].strip()
     return f"{icon} *{title}*\n👤 {artist}\n⏱ {format_duration(track.duration)} | 📻 _{genre_name}_"
 
 @dataclass
@@ -189,58 +189,70 @@ class RadioSession:
         self.is_running = False
 
     async def _play_track(self, track: TrackInfo) -> bool:
-        result: Optional[DownloadResult] = None 
-        if not self.is_running: return False
+        result: Optional[DownloadResult] = None
+        if not self.is_running:
+            return False
         try:
             await self._update_status(f"⬇️ Загрузка: *{track.title}*...")
             
             result = await self.downloader.download(track.identifier, track_info=track)
             
-            if not result or not result.success: return False
+            if not result or not result.success:
+                logger.warning(f"[{self.chat_id}] Download failed for {track.identifier}.")
+                return False
             
             caption = get_now_playing_message(track, self.display_name)
             markup = None
-            base_url = self.settings.BASE_URL.strip() if self.settings.BASE_URL else ""
-            if base_url.startswith("https") and self.chat_type != ChatType.CHANNEL:
-                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Плеер", url=base_url)]])
+            if self.settings.PLAYER_URL and self.chat_type != ChatType.CHANNEL:
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Открыть в плеере", url=self.settings.PLAYER_URL)]])
 
-            try:
-                # 1. Пробуем отправить по file_id (кэш Телеграма)
-                cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
-                
-                if cached_file_id:
-                     try:
-                         msg = await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
-                         if msg.audio: # Ensure audio was actually sent and has file_id
-                             await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
-                         await self._delete_status()
-                         return True
-                     except Exception as e:
-                         logger.warning(f"[{self.chat_id}] Failed to send cached file_id {cached_file_id}: {e}. Trying to resend file.")
-                         # Если file_id протух, удаляем и качаем заново
-                         await self.downloader._cache.delete(f"file_id:{track.identifier}")
+            audio_source = result.file_path
+            
+            # If it's a URL from Cobalt, just send the URL
+            if result.is_url:
+                logger.info(f"[{self.chat_id}] Sending audio from URL: {audio_source}")
+                await self.bot.send_audio(self.chat_id, audio=audio_source, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, timeout=120)
+                await self._delete_status()
+                return True
 
-                # 2. Отправляем файл с диска
-                if result.file_path:
-                    with open(result.file_path, 'rb') as f:
-                        msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
-                        # Сохраняем file_id на будущее
-                        if msg.audio:
-                            await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
-            
-            except Forbidden: await self._handle_forbidden(); return False
-            except Exception as e:
-                logger.warning(f"[{self.chat_id}] Failed to send audio for {track.identifier}: {e}")
-                return False
-            
-            await self._delete_status()
-            return True
+            # --- Logic for local files ---
+            # 1. Try sending by cached file_id
+            cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
+            if cached_file_id:
+                try:
+                    logger.info(f"[{self.chat_id}] Sending audio by file_id: {cached_file_id}")
+                    await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    await self._delete_status()
+                    return True
+                except Exception as e:
+                    logger.warning(f"[{self.chat_id}] Failed to send via file_id {cached_file_id}: {e}. Resending file.")
+                    await self.downloader._cache.delete(f"file_id:{track.identifier}")
+
+            # 2. Send file from disk
+            if audio_source and Path(audio_source).exists():
+                logger.info(f"[{self.chat_id}] Sending audio from file: {audio_source}")
+                with open(audio_source, 'rb') as f:
+                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    # Cache the new file_id
+                    if msg.audio:
+                        await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                await self._delete_status()
+                return True
+
+            logger.error(f"[{self.chat_id}] Local file path not found or invalid: {audio_source}")
+            return False
+
+        except Forbidden:
+            await self._handle_forbidden()
+            return False
         except Exception as e:
-            logger.error(f"[{self.chat_id}] Error in _play_track: {e}")
+            logger.error(f"[{self.chat_id}] Critical error in _play_track for {track.identifier}: {e}", exc_info=True)
             return False
         finally:
-            if result and result.file_path and os.path.exists(result.file_path):
-                try: os.unlink(result.file_path)
+            # Cleanup local file ONLY
+            if result and not result.is_url and result.file_path and Path(result.file_path).exists():
+                try:
+                    os.unlink(result.file_path)
                 except Exception as e:
                     logger.error(f"[{self.chat_id}] Failed to delete file {result.file_path}: {e}")
 
