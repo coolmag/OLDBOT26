@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Set
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
 from telegram.error import BadRequest, Forbidden
 
@@ -195,7 +195,8 @@ class RadioSession:
                 player_url = getattr(self.settings, 'PLAYER_URL', '') or getattr(self.settings, 'BASE_URL', '') or getattr(self.settings, 'WEBHOOK_URL', '').replace('/telegram', '')
                 if player_url: 
                     if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                    buttons.append(InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url)))
+                    # Безопасная кнопка для групп
+                    buttons.append(InlineKeyboardButton("▶️ Плеер", url=player_url))
                 buttons.append(InlineKeyboardButton("⏭ Скип", callback_data="skip_track"))
                 markup = InlineKeyboardMarkup([buttons])
 

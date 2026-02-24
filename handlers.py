@@ -5,7 +5,7 @@ import json
 import random
 import re
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -68,7 +68,8 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
                 markup = None
                 if player_url:
                     if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]])
+                    # Убрали WebAppInfo, теперь это безопасная универсальная кнопка
+                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", url=player_url)]])
                 
                 with open(dl_res.file_path, 'rb') as f:
                     await context.bot.send_audio(
@@ -194,7 +195,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
             if player_url:
                 if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]]))
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", url=player_url)]]))
             else:
                 await query.edit_message_reply_markup(reply_markup=None)
         except Exception: pass
