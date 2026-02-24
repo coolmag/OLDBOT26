@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Запрет кэширования браузером Telegram -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Aurora Retro Deck</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -20,9 +24,12 @@
         .bar { width: 5px; background: var(--cyan); height: 3px; border-radius: 1px; animation: bounce 0.6s infinite ease-in-out alternate; animation-play-state: paused; box-shadow: 0 0 5px var(--cyan); }
         .playing .bar { animation-play-state: running; }
         @keyframes bounce { 0% { height: 2px; background: var(--cyan); } 100% { height: 18px; background: var(--pink); box-shadow: 0 0 5px var(--pink); } }
-        .info { margin-top: 55px; text-align: center; width: 90%; z-index: 2; color: #111; }
-        .title { font-weight: 900; font-size: 16px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.5px; }
-        .artist { font-size: 13px; color: #444; font-weight: 700; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* ⚠️ ИСПРАВЛЕНА КРИВАЯ КАССЕТА (ЖЕСТКОЕ ОГРАНИЧЕНИЕ ТЕКСТА) */
+        .info { margin-top: 55px; text-align: center; width: 90%; z-index: 2; color: #111; overflow: hidden; }
+        .title { font-weight: 900; font-size: 16px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; letter-spacing: -0.5px; }
+        .artist { font-size: 13px; color: #444; font-weight: 700; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+        
         .window { width: 210px; height: 45px; background: rgba(10,10,10,0.95); border-radius: 6px; margin-top: 8px; border: 2px solid #999; border-top: 3px solid #555; border-bottom: 2px solid #ccc; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; position: relative; box-shadow: inset 0 5px 15px #000; }
         .spool { width: 32px; height: 32px; background: #fff; border-radius: 50%; border: 4px solid var(--tape); position: relative; box-shadow: 0 0 5px #000; }
         .spool::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, transparent 35%, #fff 36%), conic-gradient(transparent 10%, #aaa 10% 20%, transparent 20% 40%, #aaa 40% 50%, transparent 50% 70%, #aaa 70% 80%, transparent 80%); border-radius: 50%; animation: spin 2.5s linear infinite; animation-play-state: paused; }
@@ -39,15 +46,17 @@
         .search-box { margin-top: 20px; display: flex; justify-content: center; width: 100%; padding: 0 20px; }
         input { background: #000; border: 2px solid #333; color: var(--cyan); font-family: 'Courier New', monospace; font-weight: bold; padding: 12px; width: 100%; max-width: 320px; text-transform: uppercase; outline: none; text-align: center; border-radius: 6px; box-shadow: inset 0 0 10px rgba(0,243,255,0.1); transition: border-color 0.3s; }
         input:focus { border-color: var(--cyan); } input::placeholder { color: #555; font-weight: normal; }
+        
         #drawer-container { position: fixed; inset: 0; z-index: 100; pointer-events: none; }
         .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(3px); opacity: 0; transition: opacity 0.3s; }
         .drawer { position: absolute; bottom: 0; left: 0; right: 0; height: 70vh; background: rgba(15,15,18,0.95); border-radius: 20px 20px 0 0; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 1, 0.5, 1); display: flex; flex-direction: column; padding: 20px; border-top: 2px solid var(--cyan); box-shadow: 0 -10px 40px rgba(0,243,255,0.1); }
-        #drawer-title { margin: 0 0 15px; text-align: center; font-size: 1.2em; color: var(--cyan); text-shadow: 0 0 5px var(--cyan); text-transform: uppercase; }
+        #drawer-title { margin: 0; color: var(--cyan); text-shadow: 0 0 5px var(--cyan); text-transform: uppercase; }
         #drawer-content { overflow-y: auto; color: #fff; padding-bottom: 20px; }
         .drawer-container.active { pointer-events: all; } .drawer-container.active .overlay { opacity: 1; } .drawer-container.active .drawer { transform: translateY(0); }
         .menu-item, .playlist-item { padding: 14px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; }
         .menu-item:hover, .playlist-item:hover { background: rgba(255,255,255,0.1); border-left-color: var(--cyan); }
         .playlist-item.active { background: rgba(255,0,85,0.15); border-left-color: var(--pink); color: var(--pink); font-weight: bold; }
+        
         #ai-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 15px; padding: 20px; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(5px); }
         #ai-modal.active { opacity: 1; pointer-events: all; }
     </style>
@@ -74,7 +83,6 @@
     <div class="progress-wrapper"><div class="progress-fill" id="progress-fill"></div></div>
 
     <div class="main-controls">
-        <!-- ОШИБКА ИСПРАВЛЕНА: Теперь методы вызываются через app.player -->
         <button class="btn" onclick="app.player.prev()">◀◀</button>
         <button class="btn play-btn" id="playBtn" onclick="app.player.toggle()">PLAY</button>
         <button class="btn" onclick="app.player.next()">▶▶</button>
@@ -90,7 +98,11 @@
     <div id="drawer-container" class="drawer-container">
         <div class="overlay" id="overlay-bg"></div>
         <div id="drawer" class="drawer">
-            <h3 id="drawer-title"></h3>
+            <!-- ⚠️ ДОБАВЛЕН КРЕСТИК ЗАКРЫТИЯ -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid rgba(0,243,255,0.2); padding-bottom: 10px;">
+                <h3 id="drawer-title"></h3>
+                <button onclick="app.ui.toggleDrawer()" style="background:none; border:none; color:#fff; font-size:32px; cursor:pointer; line-height:0.5;">&times;</button>
+            </div>
             <div id="drawer-content"></div>
         </div>
     </div>
@@ -141,16 +153,9 @@
                     this.audio.addEventListener("timeupdate", () => app.ui.updateProgress(this.audio.currentTime, this.audio.duration));
                     this.audio.addEventListener("play", () => app.ui.setPlayState(true));
                     this.audio.addEventListener("pause", () => app.ui.setPlayState(false));
-                    
-                    // АВТО-ПРОПУСК ПРИ ОШИБКЕ 404 (SoundCloud не нашел трек)
                     this.audio.addEventListener("error", () => {
                         app.ui.showError("TAPE ERROR");
-                        setTimeout(() => {
-                            if (app.store._s.p.length > 1) {
-                                console.log("Skipping broken track...");
-                                this.next();
-                            }
-                        }, 2000); // Ждем 2 секунды и включаем следующий трек
+                        setTimeout(() => { if (app.store._s.p.length > 1) this.next(); }, 2000);
                     });
                 },
                 play(track) {
@@ -172,6 +177,7 @@
                     this.play(app.store._s.p[i]);
                 },
                 prev() {
+                    if (app.store._s.p.length === 0) return;
                     if (this.audio.currentTime > 3) {
                         this.audio.currentTime = 0;
                     } else {
@@ -263,7 +269,7 @@
             ],
             
             async search(queryStr) {
-                const q = queryStr || this.ui.get("query").value;
+                const q = (typeof queryStr === 'string') ? queryStr : this.ui.get("query").value;
                 if (!q) return;
                 this.ui.get("title").innerText = "SEARCHING...";
                 this.ui.get("artist").innerText = "PLEASE WAIT";
@@ -284,16 +290,13 @@
                 this.ui.get("artist").innerText = "PLEASE WAIT";
                 try {
                     const res = await this.api.askAI(q);
-                    
-                    // 🎙️ ГОЛОС ИИ! (Web Speech API)
                     if (res.message && 'speechSynthesis' in window) {
-                        window.speechSynthesis.cancel(); // Обрываем предыдущую речь
+                        window.speechSynthesis.cancel();
                         const utterance = new SpeechSynthesisUtterance(res.message);
                         utterance.lang = 'ru-RU';
-                        utterance.rate = 1.1; // Говорит чуть быстрее
+                        utterance.rate = 1.1;
                         window.speechSynthesis.speak(utterance);
                     }
-
                     if (res.playlist && res.playlist.length > 0) {
                         this.store.set({ p: res.playlist, ci: 0 });
                         this.player.play(res.playlist[0]);
