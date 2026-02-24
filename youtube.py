@@ -180,25 +180,23 @@ class YouTubeDownloader:
     async def _download_yt_local(self, video_id: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_temp")
         
-        # ⚠️ АКТУАЛЬНАЯ КОНФИГУРАЦИЯ YT-DLP (ОТКАТ OAUTH2)
+        # ⚠️ НОВАЯ СТРАТЕГИЯ YT-DLP: Приоритет на Свежие Куки, без спуфинга
         opts = {
             'format': 'bestaudio/best', 
             'outtmpl': temp_path, 
             'quiet': True, 
             'noprogress': True,
             'nocheckcertificate': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'tv', 'web_embedded'],
-                    'player_skip': ['webpage', 'configs', 'js'] 
-                }
-            },
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
         }
         
-        # Re-enabling cookies as the only viable local auth method
-        if self._settings.COOKIES_FILE.exists():
+        if self._settings.COOKIES_FILE.exists() and self._settings.COOKIES_FILE.stat().st_size > 0:
             opts['cookiefile'] = str(self._settings.COOKIES_FILE)
+            logger.info(f"[{video_id}] Attempting yt-dlp download with browser cookies.")
+        else:
+            logger.warning(f"[{video_id}] cookies.txt not found or empty. Local yt-dlp download will likely fail.")
+            # Do not attempt download without cookies, it's guaranteed to fail from a DC IP
+            return DownloadResult(success=False, error_message="cookies.txt not found")
             
         try:
             loop = asyncio.get_running_loop()
@@ -210,7 +208,7 @@ class YouTubeDownloader:
                     if p != target_path: 
                         if target_path.exists(): target_path.unlink()
                         p.rename(target_path)
-                    logger.info(f"✅ Success via local yt-dlp (Bypassed PO Token)")
+                    logger.info(f"✅ Success via local yt-dlp (Cookies worked)")
                     return DownloadResult(success=True, file_path=target_path)
         except Exception as e: 
             logger.warning(f"Local yt-dlp failed: {e}")
