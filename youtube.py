@@ -1,8 +1,8 @@
 import asyncio
 import logging
+import dataclasses
 from pathlib import Path
 from typing import List, Optional
-from dataclasses import replace, asdict
 
 import httpx
 import yt_dlp
@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v3.1 - Piped+Cobalt).
-    Waterfall Strategy: Piped -> Cobalt -> yt-dlp -> SoundCloud.
+    🎵 Aurora Downloader Engine (2026 Edition).
+    Waterfall Strategy: Cobalt API -> yt-dlp (cookies) -> SoundCloud.
     """
     
     def __init__(self, settings: Settings, cache_service: CacheService):
         self._settings = settings
         self._cache = cache_service
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
-        self.semaphore = asyncio.Semaphore(2)
+        self.semaphore = asyncio.Semaphore(2) # Максимум 2 одновременных загрузки
         self.ytmusic = YTMusic() 
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
@@ -49,6 +49,7 @@ class YouTubeDownloader:
                     duration = int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else int(parts[0])
                 except: duration = 0
                 
+                # ИСПРАВЛЕН БАГ с переменной: используем TRACK_MAX_DURATION_S
                 if duration > getattr(self._settings, 'TRACK_MAX_DURATION_S', 900): 
                     continue
 
@@ -65,7 +66,7 @@ class YouTubeDownloader:
             return results
 
         except Exception as e:
-            logger.error(f"❌ YTMusic Search error: {e}", exc_info=True)
+            logger.error(f"❌ YTMusic Search error: {e}")
             return []
 
     async def download(self, video_id: str, track_info: Optional[TrackInfo] = None) -> DownloadResult:
@@ -74,79 +75,39 @@ class YouTubeDownloader:
         if final_path.exists() and final_path.stat().st_size > 10000:
             logger.info(f"✅ Cache hit for {video_id}")
             if not track_info:
-                track_info = await self._get_track_info_from_cache(video_id)
+                track_info = await self._get_track_info_from_ytmusic(video_id)
             return DownloadResult(success=True, file_path=final_path, track_info=track_info)
             
         if not track_info:
-            track_info = await self._get_track_info_from_cache(video_id)
+            track_info = await self._get_track_info_from_ytmusic(video_id)
             if not track_info:
-                 # As a last resort, fetch from the network
-                 track_info = await self._get_track_info_from_ytmusic(video_id)
-                 if not track_info:
-                    return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
+                 return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # 1. Piped API (NEW)
-            logger.info(f" पाइप [Piped] Attempting download for {video_id}...")
-            piped_res = await self._download_piped(video_id, final_path)
-            if piped_res.success:
-                piped_res.track_info = track_info
-                return piped_res
-
-            # 2. Cobalt API
-            logger.warning(f"🎧 [Cobalt] Piped failed, trying Cobalt API for {video_id}...")
+            # 1. СТРАТЕГИЯ: COBALT API
+            logger.info(f"🎧 [Cobalt] Attempting download for {video_id}...")
             cobalt_res = await self._download_cobalt(video_id, final_path)
             if cobalt_res.success:
                 cobalt_res.track_info = track_info
                 return cobalt_res
                 
-            # 3. Local yt-dlp with cookies
+            # 2. ФОЛБЭК 1: Локальный yt-dlp с куками
             logger.warning(f"⚠️ [yt-dlp] Cobalt failed, falling back to local yt-dlp...")
             yt_res = await self._download_yt_local(video_id, final_path)
             if yt_res.success:
                 yt_res.track_info = track_info
                 return yt_res
 
-            # 4. SoundCloud
+            # 3. ФОЛБЭК 2: SoundCloud
             artist = getattr(track_info, 'uploader', getattr(track_info, 'artist', ''))
             sc_query = f"{artist} - {track_info.title}"
             logger.warning(f"☁️ [SoundCloud] YouTube blocked. Searching '{sc_query}'...")
             sc_res = await self._download_soundcloud_fallback(sc_query, final_path)
             if sc_res.success:
                 sc_res.track_info = track_info
-                # The SC download does not know about the original track_info, so we attach it here
                 return sc_res
                 
         return DownloadResult(success=False, error_message="All download providers failed")
-
-    async def _download_piped(self, video_id: str, target_path: Path) -> DownloadResult:
-        instances = self._settings.PIPED_INSTANCES or ["https://pipedapi.kavin.rocks"]
-        
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            for instance in instances:
-                base_url = instance.rstrip('/')
-                try:
-                    resp = await client.get(f"{base_url}/streams/{video_id}")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        audio_streams = data.get("audioStreams", [])
-                        if not audio_streams: continue
-                            
-                        best_audio = sorted(audio_streams, key=lambda x: x.get('bitrate', 0), reverse=True)[0]
-                        audio_url = best_audio.get("url")
-                        
-                        if audio_url:
-                            async with client.stream("GET", audio_url) as stream_resp:
-                                stream_resp.raise_for_status()
-                                with open(target_path, "wb") as f:
-                                    async for chunk in stream_resp.aiter_bytes():
-                                        f.write(chunk)
-                            logger.info(f"✅ Success via Piped ({instance})")
-                            return DownloadResult(success=True, file_path=target_path)
-                except Exception as e:
-                    logger.debug(f"Piped instance {instance} failed: {e}")
-                    continue
-        return DownloadResult(success=False, error_message="Piped instances unavailable")
 
     async def _download_cobalt(self, video_id: str, target_path: Path) -> DownloadResult:
         yt_url = f"https://music.youtube.com/watch?v={video_id}"
@@ -179,40 +140,22 @@ class YouTubeDownloader:
 
     async def _download_yt_local(self, video_id: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_temp")
-        
-        # ⚠️ НОВАЯ СТРАТЕГИЯ YT-DLP: Приоритет на Свежие Куки, без спуфинга
-        opts = {
-            'format': 'bestaudio/best', 
-            'outtmpl': temp_path, 
-            'quiet': True, 
-            'noprogress': True,
-            'nocheckcertificate': True,
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
-        }
-        
-        if self._settings.COOKIES_FILE.exists() and self._settings.COOKIES_FILE.stat().st_size > 0:
+        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path, 'quiet': True, 'noprogress': True, 'nocheckcertificate': True, 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}]}
+        if self._settings.COOKIES_FILE.exists():
             opts['cookiefile'] = str(self._settings.COOKIES_FILE)
-            logger.info(f"[{video_id}] Attempting yt-dlp download with browser cookies.")
-        else:
-            logger.warning(f"[{video_id}] cookies.txt not found or empty. Local yt-dlp download will likely fail.")
-            # Do not attempt download without cookies, it's guaranteed to fail from a DC IP
-            return DownloadResult(success=False, error_message="cookies.txt not found")
-            
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"https://music.youtube.com/watch?v={video_id}"))
-            
             paths = [Path(temp_path + ".mp3"), Path(temp_path)]
             for p in paths:
                 if p.exists() and p.stat().st_size > 10000:
                     if p != target_path: 
-                        if target_path.exists(): target_path.unlink()
+                        if target_path.exists(): target_path.unlink(missing_ok=True)
                         p.rename(target_path)
-                    logger.info(f"✅ Success via local yt-dlp (Cookies worked)")
+                    logger.info(f"✅ Success via local yt-dlp")
                     return DownloadResult(success=True, file_path=target_path)
-        except Exception as e: 
+        except Exception as e:
             logger.warning(f"Local yt-dlp failed: {e}")
-            
         return DownloadResult(success=False)
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
@@ -232,7 +175,7 @@ class YouTubeDownloader:
         except Exception as e:
             logger.error(f"SoundCloud fallback failed: {e}")
         return DownloadResult(success=False, error_message="SC Fallback failed")
-        
+
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
             loop = asyncio.get_running_loop()
@@ -240,12 +183,13 @@ class YouTubeDownloader:
             if not song_data or not song_data.get('videoDetails'): return None
             details = song_data['videoDetails']
             track_info = TrackInfo(identifier=details['videoId'], title=details['title'], uploader=details.get('author', ''), duration=int(details.get('lengthSeconds', 0)), url=f"https://music.youtube.com/watch?v={details['videoId']}", thumbnail_url=details['thumbnail']['thumbnails'][-1]['url'] if details.get('thumbnail') else None, source=Source.YOUTUBE)
+            # ВАЖНОЕ ИСПРАВЛЕНИЕ: dataclasses.asdict
             await self._cache.set(f"trackinfo:{video_id}", dataclasses.asdict(track_info), ttl=3600 * 24 * 7)
             return track_info
         except Exception:
             return None
 
-    async def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
+    def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
         cached_info = await self._cache.get(f"trackinfo:{video_id}")
         if cached_info:
             return TrackInfo(**cached_info)

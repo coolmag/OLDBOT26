@@ -1,4 +1,4 @@
-# Version: 52 - Gemini 3.1 Refactor
+# Version: 4.0 - Masterpiece 2026
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -26,34 +26,29 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Инициализация базовых сервисов
     setup_logging()
     settings = get_settings()
     app.state.settings = settings
     
     logger.info("⚡ System Starting Up (Cobalt Engine)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg detected.")
-    else: logger.warning("⚠️ FFmpeg not found! Local fallbacks might fail.")
+    else: logger.warning("⚠️ FFmpeg not found!")
 
-    # 2. Инициализация кэша
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
     
-    # 3. Инициализация AI и Chat менеджеров
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager)
     
-    # 4. Инициализация ЕДИНОГО загрузчика, который управляет всеми фоллбэками
     downloader = YouTubeDownloader(settings, cache)
     spotify_service = SpotifyService(settings, downloader)
     
-    # 5. Сборка и настройка Telegram приложения
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
     
-    radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader)
+    # ВНИМАНИЕ: Передаем chat_manager в радио
+    radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
     
-    # 6. Внедрение всех зависимостей в контекст Telegram
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
@@ -62,18 +57,11 @@ async def lifespan(app: FastAPI):
     tg_app.settings = settings
     tg_app.cache = cache
     
-    # 7. Регистрация хендлеров
     setup_handlers(tg_app)
     
-    commands = [
-        BotCommand("radio", "🎲 Случайная волна"),
-        BotCommand("play", "🔎 Найти трек"),
-        BotCommand("stop", "🛑 Остановить"),
-        BotCommand("admin", "⚙️ Настройки"),
-    ]
+    commands = [BotCommand("radio", "🎲 Случайная волна"), BotCommand("play", "🔎 Найти трек"), BotCommand("skip", "⏭ Следующий трек"), BotCommand("stop", "🛑 Остановить"), BotCommand("admin", "⚙️ Настройки")]
     await tg_app.bot.set_my_commands(commands)
     
-    # 8. Запуск Telegram бота
     await tg_app.initialize()
     await tg_app.start()
     
@@ -81,25 +69,26 @@ async def lifespan(app: FastAPI):
         await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL)
         logger.info(f"🔗 Webhook set to: {settings.WEBHOOK_URL}")
     
-    # 9. Передача ключевых сервисов в состояние FastAPI для веб-эндпоинтов
     app.state.tg_app = tg_app
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
     
     yield
     
-    # --- Shutdown Logic ---
     logger.info("🔻 System Shutting Down...")
     await radio_manager.stop_all()
     await tg_app.stop()
     await tg_app.shutdown()
     await cache.close()
-    logger.info("🛑 System Stopped.")
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# --- API Endpoints ---
+@app.get("/api/health")
+async def health_check():
+    """Railway Health Check Endpoint"""
+    return {"status": "ok", "engine": "Aurora v3.1"}
+
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     tg_app = request.app.state.tg_app
@@ -109,11 +98,6 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         logger.error(f"Webhook processing error: {e}", exc_info=True)
     return {"ok": True}
-
-@app.get("/api/health")
-async def health_check():
-    """Railway Health Check Endpoint"""
-    return {"status": "ok", "engine": "Cobalt Waterfall v3.1"}
 
 @app.get("/api/player/playlist")
 async def get_playlist(query: str, request: Request):
@@ -127,7 +111,6 @@ async def get_playlist(query: str, request: Request):
 @app.get("/stream/{video_id}")
 async def stream_audio(video_id: str, request: Request):
     downloader = request.app.state.downloader
-    # The new downloader always provides a local file path, so this logic is simple
     download_result = await downloader.download(video_id)
     
     if download_result and download_result.success and download_result.file_path:
