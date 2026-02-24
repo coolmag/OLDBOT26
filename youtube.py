@@ -180,31 +180,25 @@ class YouTubeDownloader:
     async def _download_yt_local(self, video_id: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_temp")
         
-        # ⚠️ АКТУАЛЬНАЯ КОНФИГУРАЦИЯ YT-DLP (ФЕВРАЛЬ 2026)
+        # ⚠️ АКТУАЛЬНАЯ КОНФИГУРАЦИЯ YT-DLP (ОТКАТ OAUTH2)
         opts = {
-            'username': 'oauth2',  # <--- ВКЛЮЧАЕМ OAUTH2 АВТОРИЗАЦИЮ
             'format': 'bestaudio/best', 
             'outtmpl': temp_path, 
             'quiet': True, 
             'noprogress': True,
             'nocheckcertificate': True,
-            # Обходим PO Token, используя API клиентов, где он не требуется
             'extractor_args': {
                 'youtube': {
-                    # Эмулируем iOS, TV и встроенный плеер. Исключаем WEB и ANDROID.
                     'player_client': ['ios', 'tv', 'web_embedded'],
-                    # Отключаем попытки решить JS челленджи, которые все равно упадут
                     'player_skip': ['webpage', 'configs', 'js'] 
                 }
             },
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
         }
         
-        # OMITTING COOKIES: The 'ios' and 'tv' clients do not support cookies
-        # and providing them seems to cause a "page needs to be reloaded" error.
-        # OAuth2 is the preferred method now.
-        # if self._settings.COOKIES_FILE.exists():
-        #     opts['cookiefile'] = str(self._settings.COOKIES_FILE)
+        # Re-enabling cookies as the only viable local auth method
+        if self._settings.COOKIES_FILE.exists():
+            opts['cookiefile'] = str(self._settings.COOKIES_FILE)
             
         try:
             loop = asyncio.get_running_loop()
