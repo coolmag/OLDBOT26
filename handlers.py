@@ -155,31 +155,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     settings = context.application.settings
-    chat_id = update.effective_chat.id
     
     if query.data == "close_admin":
-        return await query.delete_message()
+        await query.delete_message()
+        return
 
+    # ОБРАБОТКА СКИПА ИЗ ПОД ТРЕКА
     if query.data == "skip_track":
         radio_manager = context.application.radio_manager
-        await radio_manager.skip(chat_id)
+        await radio_manager.skip(update.effective_chat.id)
         try:
+            # Убираем только кнопку скип, оставляем плеер
             player_url = getattr(settings, 'PLAYER_URL', getattr(settings, 'BASE_URL', ''))
-            new_markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]]) if player_url else None
-            await query.edit_message_reply_markup(reply_markup=new_markup)
-        except: pass
+            if player_url:
+                new_markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]])
+                await query.edit_message_reply_markup(reply_markup=new_markup)
+            else:
+                await query.edit_message_reply_markup(reply_markup=None)
+        except Exception: pass
         return
 
     if query.data.startswith("set_mode|"):
         if user_id not in settings.ADMIN_ID_LIST:
-            return await query.answer("⛔️ Только для админа!", show_alert=True)
+            await query.answer("⛔️ Только для админа!", show_alert=True)
+            return
             
         mode = query.data.split("|")[1]
         chat_manager = context.application.chat_manager
-        chat_manager.set_mode(chat_id, mode)
+        chat_manager.set_mode(update.effective_chat.id, mode)
         
         greeting = random.choice(GREETINGS.get(mode, ["Привет!"]))
-        await context.bot.send_message(chat_id, greeting)
+        await context.bot.send_message(update.effective_chat.id, greeting)
         await query.delete_message()
 
 def setup_handlers(app: Application):

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.constants import ParseMode, ChatType

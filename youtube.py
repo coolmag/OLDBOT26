@@ -183,13 +183,13 @@ class YouTubeDownloader:
             if not song_data or not song_data.get('videoDetails'): return None
             details = song_data['videoDetails']
             track_info = TrackInfo(identifier=details['videoId'], title=details['title'], uploader=details.get('author', ''), duration=int(details.get('lengthSeconds', 0)), url=f"https://music.youtube.com/watch?v={details['videoId']}", thumbnail_url=details['thumbnail']['thumbnails'][-1]['url'] if details.get('thumbnail') else None, source=Source.YOUTUBE)
-            # ВАЖНОЕ ИСПРАВЛЕНИЕ: dataclasses.asdict
+            # Сохраняем в кэш без ошибок
             await self._cache.set(f"trackinfo:{video_id}", dataclasses.asdict(track_info), ttl=3600 * 24 * 7)
             return track_info
         except Exception:
             return None
 
-    def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
+    async def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
         cached_info = await self._cache.get(f"trackinfo:{video_id}")
         if cached_info:
             return TrackInfo(**cached_info)
