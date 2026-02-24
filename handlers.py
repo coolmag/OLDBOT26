@@ -22,7 +22,9 @@ GREETINGS = {
     "gop": ["Здарова, бродяга! Че каво?", "Вечер в хату."],
     "chill": ["Вайб включен... 🌌", "Расслабься..."],
     "expert": ["Рада вернуться к интеллектуальным беседам.", "Анализ музыкальных произведений запущен."],
-    "standup": ["О, новые зрители! Готовьтесь к прожарке.", "Проверка микрофона... раз-два."]
+    "standup": ["О, новые зрители! Готовьтесь к прожарке.", "Проверка микрофона... раз-два."],
+    "cyberpunk": ["Система взломана. Я в сети. 🌐", "Подключение к матрице установлено. Готовь уши."],
+    "anime": ["Охайо, семпай! Аврора-тян готова ставить музыку! ✨", "Уиии! Давайте веселиться! 💖"]
 }
 
 # --- Internal Action Functions ---
@@ -60,9 +62,7 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
             try:
                 info = dl_res.track_info
                 
-                # 🎛 ЖЕЛЕЗОБЕТОННАЯ КНОПКА ПЛЕЕРА
                 settings = context.application.settings
-                # Пытаемся взять PLAYER_URL, если нет - BASE_URL, если нет - вырезаем из WEBHOOK_URL
                 player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
                 
                 markup = None
@@ -70,14 +70,13 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
                     if not player_url.startswith('http'): player_url = f"https://{player_url}"
                     markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", web_app=WebAppInfo(url=player_url))]])
                 
-                logger.info(f"Отправка файла {info.title} с плеером: {player_url}")
                 with open(dl_res.file_path, 'rb') as f:
                     await context.bot.send_audio(
                         chat_id=chat_id, audio=f,
                         title=info.title if info else "Track", 
                         performer=info.artist if info else "Unknown", 
                         duration=info.duration if info else 0,
-                        reply_markup=markup # Прикрепляем кнопку
+                        reply_markup=markup
                     )
             except Exception as e:
                 logger.error(f"Error sending audio: {e}", exc_info=True)
@@ -87,11 +86,13 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
+
 async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, update: Update):
     effective_query = query or "случайные популярные треки"
     await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{effective_query}*", parse_mode=ParseMode.MARKDOWN)
     radio_manager = context.application.radio_manager
     asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=update.effective_chat.type))
+
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE, update: Update):
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -160,7 +161,16 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     current_mode = context.application.chat_manager.get_mode(update.effective_chat.id)
-    mode_names = {"default": "Эстет", "standup": "Комик", "expert": "Эксперт", "gop": "Гопник", "toxic": "Токсик", "chill": "Чилл"}
+    mode_names = {
+        "default": "Эстет",
+        "standup": "Комик",
+        "expert": "Эксперт",
+        "gop": "Гопник",
+        "toxic": "Токсик",
+        "chill": "Чилл",
+        "cyberpunk": "Хакер 🌐",
+        "anime": "Аниме 🌸"
+    }
     
     keyboard = [[InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{mode_names.get(mode, mode)}", callback_data=f"set_mode|{mode}")] for mode in PERSONAS.keys()]
     keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="close_admin")])
@@ -172,15 +182,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     settings = context.application.settings
+    chat_id = update.effective_chat.id
     
     if query.data == "close_admin":
         await query.delete_message()
         return
 
     if query.data == "skip_track":
-        await context.application.radio_manager.skip(update.effective_chat.id)
+        await context.application.radio_manager.skip(chat_id)
         try:
-            # Убираем кнопку скипа, оставляем только плеер
             player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
             if player_url:
                 if not player_url.startswith('http'): player_url = f"https://{player_url}"
@@ -190,7 +200,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception: pass
         return
 
-    # ⚠️ ВОТ ИСПРАВЛЕНИЕ: Теперь бот правильно проверяет права при нажатии на кнопку!
     if query.data.startswith("set_mode|"):
         is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
         if not is_admin:
@@ -198,10 +207,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         mode = query.data.split("|")[1]
-        context.application.chat_manager.set_mode(update.effective_chat.id, mode)
+        context.application.chat_manager.set_mode(chat_id, mode)
         
         greeting = random.choice(GREETINGS.get(mode, ["Привет!"]))
-        await context.bot.send_message(update.effective_chat.id, greeting)
+        await context.bot.send_message(chat_id, greeting)
         await query.delete_message()
 
 def setup_handlers(app: Application):

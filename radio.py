@@ -29,7 +29,12 @@ def format_duration(seconds: int) -> str:
 
 def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     icon = random.choice(["🎧", "🎵", "🎶", "📻", "💿"])
-    return f"{icon} *{track.title[:40].strip()}*\n👤 {track.artist[:30].strip()}\n⏱ {format_duration(track.duration)} | 📻 _{genre_name}_"
+    # Очищаем текст от символов, которые ломают Telegram Markdown
+    safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    
+    return f"{icon} *{safe_title[:40].strip()}*\n👤 {safe_artist[:30].strip()}\n⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     all_queries = []
@@ -197,27 +202,37 @@ class RadioSession:
             audio_source = result.file_path
             
             if result.is_url:
-                await self.bot.send_audio(self.chat_id, audio=str(audio_source), caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, timeout=120)
+                await self.bot.send_audio(self.chat_id, audio=str(audio_source), caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
                 await self._delete_status()
                 return True
 
             cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
             if cached_file_id:
                 try:
-                    await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
                     await self._delete_status()
                     return True
-                except Exception: await self.downloader._cache.delete(f"file_id:{track.identifier}")
+                except Exception as e:
+                    logger.warning(f"Failed to send cached file_id: {e}")
+                    await self.downloader._cache.delete(f"file_id:{track.identifier}")
 
             if audio_source and Path(audio_source).exists():
                 with open(audio_source, 'rb') as f:
-                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    # Добавлены таймауты, чтобы Railway не обрывал отправку больших файлов
+                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=120)
                     if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 await self._delete_status()
                 return True
+                
             return False
-        except Forbidden: await self._handle_forbidden(); return False
-        except Exception: return False
+            
+        except Forbidden: 
+            await self._handle_forbidden()
+            return False
+        except Exception as e: 
+            # ТЕПЕРЬ МЫ УВИДИМ ОШИБКУ В ЛОГАХ ЕСЛИ ЧТО-ТО ПОЙДЕТ НЕ ТАК
+            logger.error(f"[{self.chat_id}] CRITICAL SEND ERROR: {e}", exc_info=True)
+            return False
         finally:
             if result and not result.is_url and result.file_path and Path(result.file_path).exists():
                 try: os.unlink(result.file_path)
