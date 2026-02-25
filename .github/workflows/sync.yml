@@ -1,0 +1,15 @@
+name: Sync to Hugging Face hub
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: git push --force https://tyca777_hf:$HF_TOKEN@huggingface.co/spaces/tyca777/777 main
