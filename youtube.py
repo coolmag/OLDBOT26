@@ -106,11 +106,27 @@ class YouTubeDownloader:
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_sc_temp")
-        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path, 'quiet': True, 'noprogress': True, 'noplaylist': True, 'max_filesize': 20000000, 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]}
+        
+        # ⚠️ ФИЛЬТР: Отсекаем диджей-сеты и миксы длиннее 12 минут еще ДО скачивания
+        def duration_filter(info, *, incomplete):
+            duration = info.get('duration')
+            if duration and duration > 720:
+                return 'Трек слишком длинный (Микс)'
+            return None
+
+        opts = {
+            'format': 'bestaudio/best', 
+            'outtmpl': temp_path, 
+            'quiet': True, 
+            'noprogress': True, 
+            'noplaylist': True,
+            'max_filesize': 20000000, 
+            'match_filter': duration_filter, # Включаем фильтр
+            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
+        }
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"scsearch1:{query}"))
-            
             paths = [Path(temp_path + ".mp3"), Path(temp_path)]
             for p in paths:
                 if p.exists() and p.stat().st_size > 10000:
@@ -121,8 +137,7 @@ class YouTubeDownloader:
                     return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
             logger.error(f"SoundCloud fallback failed: {e}")
-            
-        return DownloadResult(success=False, error_message="SC Fallback failed")
+        return DownloadResult(success=False, error_message="SC Fallback failed or track rejected")
 
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
