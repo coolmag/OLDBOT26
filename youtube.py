@@ -46,8 +46,15 @@ class YouTubeDownloader:
                 duration_text = item.get('duration', '0:00')
                 try:
                     parts = duration_text.split(':')
-                    duration = int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else int(parts[0])
-                except: duration = 0
+                    # ⚠️ ПРАВИЛЬНАЯ МАТЕМАТИКА ВРЕМЕНИ
+                    if len(parts) == 3: # Формат ЧЧ:ММ:СС
+                        duration = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                    elif len(parts) == 2: # Формат ММ:СС
+                        duration = int(parts[0]) * 60 + int(parts[1])
+                    else: # Формат СС
+                        duration = int(parts[0])
+                except: 
+                    duration = 0
                 
                 if duration > getattr(self._settings, 'TRACK_MAX_DURATION_S', 900): 
                     continue

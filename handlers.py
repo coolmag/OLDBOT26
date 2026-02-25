@@ -55,38 +55,43 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE)
     )
 
     downloader = context.application.downloader
-    tracks = await downloader.search(query, limit=1)
+    # ⚠️ ИЩЕМ 5 ТРЕКОВ ПРО ЗАПАС, А НЕ 1
+    tracks = await downloader.search(query, limit=5)
 
     if tracks:
-        dl_res = await downloader.download(tracks[0].identifier, tracks[0])
+        for track in tracks:
+            dl_res = await downloader.download(track.identifier, track)
 
-        if dl_res.success and dl_res.file_path:
-            await msg.delete() # Удаляем только если скачали успешно
-            try:
-                info = dl_res.track_info
-                
-                settings = context.application.settings
-                player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
-                
-                markup = None
-                if player_url:
-                    if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                    # Убрали WebAppInfo, теперь это безопасная универсальная кнопка
-                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", url=player_url)]])
-                
-                with open(dl_res.file_path, 'rb') as f:
-                    await context.bot.send_audio(
-                        chat_id=chat_id, audio=f,
-                        title=info.title if info else "Track", 
-                        performer=info.artist if info else "Unknown", 
-                        duration=info.duration if info else 0,
-                        reply_markup=markup
-                    )
-            except Exception as e:
-                logger.error(f"Error sending audio: {e}", exc_info=True)
-                await context.bot.send_message(chat_id, "❌ Ошибка при отправке файла.")
-        else:
-             await msg.edit_text(f"😕 Не удалось скачать трек: {dl_res.error_message}")
+            # Если трек успешно скачался и прошел лимит в 20 МБ
+            if dl_res.success and dl_res.file_path:
+                await msg.delete()
+                try:
+                    info = dl_res.track_info
+                    
+                    settings = context.application.settings
+                    player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
+                    
+                    markup = None
+                    if player_url:
+                        if not player_url.startswith('http'): player_url = f"https://{player_url}"
+                        markup = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", url=player_url)]])
+                    
+                    with open(dl_res.file_path, 'rb') as f:
+                        await context.bot.send_audio(
+                            chat_id=chat_id, audio=f,
+                            title=info.title if info else "Track", 
+                            performer=info.artist if info else "Unknown", 
+                            duration=info.duration if info else 0,
+                            reply_markup=markup
+                        )
+                    return # УСПЕХ! ВЫХОДИМ ИЗ ФУНКЦИИ
+                except Exception as e:
+                    logger.error(f"Error sending audio: {e}", exc_info=True)
+                    await context.bot.send_message(chat_id, "❌ Ошибка при отправке файла.")
+                    return
+        
+        # Если ни один из 5 треков не удалось скачать
+        await msg.edit_text("😕 Не удалось скачать трек: Все найденные варианты заблокированы или весят больше 20 МБ.")
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
