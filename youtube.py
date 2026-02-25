@@ -99,7 +99,7 @@ class YouTubeDownloader:
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_sc_temp")
-        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path, 'quiet': True, 'noprogress': True, 'noplaylist': True, 'max_filesize': 20000000, # ⚠️ ЗАЩИТА: Строгий лимит 20 МБ! 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]}
+        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path, 'quiet': True, 'noprogress': True, 'noplaylist': True, 'max_filesize': 20000000, 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]}
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"scsearch1:{query}"))
