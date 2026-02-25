@@ -137,14 +137,23 @@ class RadioSession:
     async def _radio_loop(self):
         while self.is_running:
             try:
-                # 🔄 Ротация жанров раз в час
+                # 🔄 Ротация жанров И ХАРАКТЕРА ИИ раз в час
                 if time.time() - self.last_genre_change > 3600:
+                    from radio import get_random_catalog_query 
+                    from ai_personas import PERSONAS # Загружаем список личностей
+                    
+                    # 1. Меняем музыку
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
                     self.last_genre_change = time.time()
                     
-                    prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. Напиши короткий стильный анонс об этом в чат."
+                    # 2. 🔥 АВТО-СМЕНА ХАРАКТЕРА ИИ
+                    available_modes = list(PERSONAS.keys())
+                    new_mode = random.choice(available_modes)
+                    self.chat_manager.set_mode(self.chat_id, new_mode) # Устанавливаем новую личность
+                    
+                    prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. А еще у меня внезапно сменилось настроение на 100%! Напиши классный, сбивающий с толку анонс об этом в чат в своем стиле."
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
                     if announcement:
                         await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
