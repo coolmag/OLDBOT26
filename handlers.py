@@ -104,7 +104,7 @@ async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: Conte
 
 # --- Handlers ---
 
-# 🔥 ИДЕЯ 4: ГОЛОСОВОЕ УПРАВЛЕНИЕ
+# 🔥 ИДЕЯ 4: ГОЛОСОВОЕ УПРАВЛЕНИЕ (Исправленное)
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     msg = await context.bot.send_message(chat_id, "🎧 <i>Анализирую голос...</i>", parse_mode=ParseMode.HTML)
@@ -116,7 +116,6 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_manager = context.application.ai_manager
         if hasattr(ai_manager, 'gemini_client'):
             from google.genai import types
-            # Отправляем аудио-поток прямо в мозг Gemini 2.5 Flash
             response = ai_manager.gemini_client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=[
@@ -124,17 +123,42 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Транскрибируй это голосовое сообщение в текст. Выведи ТОЛЬКО текст, без кавычек и лишних слов."
                 ]
             )
+            
+            # Проверка на пустой ответ ИИ
+            if not response or not response.text:
+                await msg.edit_text("❌ ИИ не смог разобрать слова. Повторите четче.")
+                return
+
             transcribed_text = response.text.strip()
+            if not transcribed_text:
+                await msg.edit_text("❌ Вы ничего не сказали.")
+                return
+
             await msg.edit_text(f"🗣 <b>Вы сказали:</b> {transcribed_text}", parse_mode=ParseMode.HTML)
 
-            # Подменяем текст и прогоняем через стандартный текстовый анализатор!
-            update.effective_message.text = transcribed_text
-            await text_handler(update, context)
+            # Передаем текст в анализатор намерений напрямую, а не через подмену объекта!
+            analysis = await ai_manager.analyze_message(transcribed_text)
+            intent, query = analysis.get("intent"), analysis.get("query")
+            
+            user_name = update.effective_user.first_name
+            
+            # Маршрутизируем команду так же, как в text_handler
+            if intent == 'search' and query:
+                if "|" in query:
+                    q, d = query.split("|", 1)
+                    await _do_play(chat_id, q.strip(), context, dedication=d.strip())
+                else: 
+                    await _do_play(chat_id, query, context)
+            elif intent == 'radio' and query: 
+                await _do_radio(chat_id, query, context)
+            elif intent == 'chat': 
+                await _do_chat_reply(chat_id, transcribed_text, user_name, context)
+
         else:
             await msg.edit_text("❌ Голосовое управление недоступно (нет ключа Gemini).")
     except Exception as e:
-        logger.error(f"Voice error: {e}")
-        await msg.edit_text("❌ Ошибка распознавания голоса.")
+        logger.error(f"Voice error: {e}", exc_info=True)
+        await msg.edit_text("❌ Ошибка распознавания голоса. Попробуйте еще раз.")
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
