@@ -17,7 +17,6 @@ from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
 
-# Загрузка каталога жанров
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
     MUSIC_CATALOG = json.load(f)
 
@@ -28,12 +27,10 @@ def format_duration(seconds: int) -> str:
     return f"{mins}:{secs:02d}"
 
 def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
-    """Безопасное форматирование текста для Telegram (защита от сломанного Markdown)"""
     icon = random.choice(["🎧", "🎵", "🎶", "📻", "💿"])
     safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
-    
     return f"{icon} *{safe_title[:40].strip()}*\n👤 {safe_artist[:30].strip()}\n⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
@@ -163,12 +160,34 @@ class RadioSession:
                         continue
 
                 track = self.playlist.pop(0)
+
+                # ⚡️ ШАГ 1: ТИХАЯ ЗАГРУЗКА (БЕЗ АНОНСОВ)
+                await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
+                result = await self.downloader.download(track.identifier, track_info=track)
+                
+                # ⚡️ ШАГ 2: ЖЕСТКАЯ ПРОВЕРКА НА БРАК
+                is_valid_file = False
+                if result and result.success:
+                    if result.is_url or await self.downloader._cache.get(f"file_id:{track.identifier}"):
+                        is_valid_file = True
+                    elif result.file_path and Path(result.file_path).exists():
+                        file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
+                        if file_size_mb <= 20.0:
+                            is_valid_file = True
+                        else:
+                            logger.error(f"[{self.chat_id}] ❌ Трек {track.title} весит {file_size_mb:.1f} MB (>20MB). Удаляем.")
+                            os.unlink(result.file_path)
+
+                # ЕСЛИ ТРЕК БРАКОВАННЫЙ ИЛИ НЕ НАЙДЕН - ПРОПУСКАЕМ МОЛЧА!
+                if not is_valid_file:
+                    await self._delete_status()
+                    continue
+
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
-                # 🔥 ИИ-ДИДЖЕЙ: ЖИВОЙ ЭФИР С УЛЬТРА-РАНДОМОМ
+                # ⚡️ ШАГ 3: ИИ ОТКРЫВАЕТ РОТ ТОЛЬКО КОГДА ТРЕК УЖЕ ЛЕЖИТ НА СЕРВЕРЕ
                 try:
-                    # Генератор абсолютно разных тем, чтобы ИИ физически не мог повторяться
                     topics = [
                         "смешную сплетню (можно выдуманную) про",
                         "какую-нибудь дикую историю с концерта",
@@ -179,14 +198,11 @@ class RadioSession:
                         "что-то про космические корабли, инопланетян и как это связано с песней",
                         "дерзкую шутку про музыкальных критиков, а затем включи"
                     ]
-                    
                     random_topic = random.choice(topics)
-                    
                     prompt = f"""Ты в прямом эфире радио! Твоя задача: Расскажи {random_topic} артиста '{track.artist}' или трека '{track.title}'.
-                    
                     ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
-                    1. Отвечай СТРОГО в стиле своей текущей личности (используй свой сленг).
-                    2. СТРОГИЙ ЗАПРЕТ на фразы: "свидание вслепую", "экзистенциальный ужас", "бессонница". ЗАБУДЬ ЭТИ СЛОВА!
+                    1. Отвечай СТРОГО в стиле своей текущей личности.
+                    2. СТРОГИЙ ЗАПРЕТ на фразы: "свидание вслепую", "экзистенциальный ужас", "бессонница". ЗАБУДЬ ИХ!
                     3. Придумай что-то абсолютно новое, креативное и безумное.
                     4. Будь кратким (максимум 2-3 предложения)."""
                     
@@ -196,81 +212,54 @@ class RadioSession:
                 except Exception as e:
                     logger.error(f"DJ Intro error: {e}")
 
-                # 🎵 Скачивание и отправка трека
-                success = await self._play_track(track)
+                # ⚡️ ШАГ 4: ОТПРАВКА ИДЕАЛЬНОГО ТРЕКА В ЧАТ
+                success = await self._send_track(track, result)
                 
                 if success:
-                    # ⚠️ Ждем ровно 3 минуты до следующего трека (если не нажат Скип)
-                    try: 
-                        await asyncio.wait_for(self.skip_event.wait(), timeout=180.0)
-                    except asyncio.TimeoutError: 
-                        pass 
-                else: 
-                    await asyncio.sleep(2)
+                    try: await asyncio.wait_for(self.skip_event.wait(), timeout=180.0)
+                    except asyncio.TimeoutError: pass 
+                else: await asyncio.sleep(2)
                 
                 self.skip_event.clear()
             except asyncio.CancelledError: break
             except Exception as e: logger.error(f"Loop error: {e}"); await asyncio.sleep(5)
         self.is_running = False
 
-    async def _play_track(self, track: TrackInfo) -> bool:
-        result = None
-        if not self.is_running: return False
+    async def _send_track(self, track: TrackInfo, result: DownloadResult) -> bool:
+        """Метод выделен только для чистой отправки готового файла"""
         try:
-            await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
-            result = await self.downloader.download(track.identifier, track_info=track)
-            
-            if not result or not result.success: return False
-            
             caption = get_now_playing_message(track, self.display_name)
             
-            # 🎛 ФОРМИРОВАНИЕ КНОПОК ПЛЕЕРА И СКИПА
             markup = None
             if self.chat_type != ChatType.CHANNEL:
                 buttons = []
                 player_url = getattr(self.settings, 'PLAYER_URL', '') or getattr(self.settings, 'BASE_URL', '') or getattr(self.settings, 'WEBHOOK_URL', '').replace('/telegram', '')
                 if player_url: 
                     if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                    # ⚠️ ИСПОЛЬЗУЕМ url= ВМЕСТО web_app= ЧТОБЫ РАБОТАЛО В ГРУППАХ
                     buttons.append(InlineKeyboardButton("▶️ Плеер", url=player_url))
                 buttons.append(InlineKeyboardButton("⏭ Скип", callback_data="skip_track"))
                 markup = InlineKeyboardMarkup([buttons])
 
             audio_source = result.file_path
             
-            # 1. Отправка по прямой ссылке (Cobalt)
             if result.is_url:
                 await self.bot.send_audio(self.chat_id, audio=audio_source, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
                 await self._delete_status()
                 return True
 
-            # 2. Отправка из Telegram-кэша (file_id)
             cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
             if cached_file_id:
                 try:
                     await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
                     await self._delete_status()
                     return True
-                except Exception as e:
-                    logger.warning(f"Failed to send cached file_id: {e}")
+                except Exception:
                     await self.downloader._cache.delete(f"file_id:{track.identifier}")
 
-            # 3. Отправка скачанного файла с диска
             if audio_source and Path(audio_source).exists():
-                file_path = Path(audio_source)
-                
-                # ⚠️ ФИНАЛЬНАЯ ПРОВЕРКА: Весит ли файл больше 20 МБ?
-                file_size_mb = file_path.stat().st_size / (1024 * 1024)
-                if file_size_mb > 20.0:
-                    logger.error(f"[{self.chat_id}] ❌ Трек слишком большой: {file_size_mb:.1f} MB (Лимит 20MB). Пропуск.")
-                    os.unlink(file_path)
-                    return False
-                
-                # ⚠️ ОТПРАВКА С БОЛЬШИМИ ТАЙМАУТАМИ (чтобы не отвалилось по NetworkError)
                 with open(audio_source, 'rb') as f:
                     msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=120)
                     if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
-                
                 await self._delete_status()
                 return True
                 
@@ -283,11 +272,9 @@ class RadioSession:
             logger.error(f"[{self.chat_id}] CRITICAL SEND ERROR: {e}", exc_info=True)
             return False
         finally:
-            # Очистка диска после успешной (или неуспешной) отправки
             if result and not result.is_url and result.file_path and Path(result.file_path).exists():
                 try: os.unlink(result.file_path)
                 except: pass
-
 
 class RadioManager:
     def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager):
