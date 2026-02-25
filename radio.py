@@ -167,10 +167,13 @@ class RadioSession:
                 success = await self._play_track(track)
                 
                 if success:
-                    wait_time = min(track.duration, 300) if track.duration > 0 else 180
-                    try: await asyncio.wait_for(self.skip_event.wait(), timeout=wait_time)
-                    except asyncio.TimeoutError: pass 
-                else: await asyncio.sleep(2)
+                    # ⚠️ Ждем ровно 3 минуты до следующего трека (если не нажат Скип)
+                    try: 
+                        await asyncio.wait_for(self.skip_event.wait(), timeout=180.0)
+                    except asyncio.TimeoutError: 
+                        pass 
+                else: 
+                    await asyncio.sleep(2)
                 
                 self.skip_event.clear()
             except asyncio.CancelledError: break
@@ -218,9 +221,20 @@ class RadioSession:
                     await self.downloader._cache.delete(f"file_id:{track.identifier}")
 
             if audio_source and Path(audio_source).exists():
+                file_path = Path(audio_source)
+                # ⚠️ ФИНАЛЬНАЯ ПРОВЕРКА: Весит ли файл больше 20 МБ?
+                file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                if file_size_mb > 20.0:
+                    logger.error(f"[{self.chat_id}] ❌ Трек слишком большой: {file_size_mb:.1f} MB (Лимит 20MB). Пропуск.")
+                    os.unlink(file_path) # Удаляем гиганта, чтобы не забил память
+                    return False
+                
                 with open(audio_source, 'rb') as f:
                     # Добавлены таймауты, чтобы Railway не обрывал отправку больших файлов
-                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=120)
+                    msg = await self.bot.send_audio(
+                        self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, 
+                        reply_markup=markup, read_timeout=120, write_timeout=120
+                    )
                     if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 await self._delete_status()
                 return True
