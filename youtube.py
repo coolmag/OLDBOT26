@@ -121,6 +121,7 @@ class YouTubeDownloader:
             'noprogress': True, 
             'noplaylist': True,
             'max_filesize': 20000000, 
+            'nopart': True, # ⚠️ ЗАЩИТА ОТ ГЛЮКОВ ФАЙЛОВОЙ СИСТЕМЫ RAILWAY
             'match_filter': duration_filter, # Включаем фильтр
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
         }
