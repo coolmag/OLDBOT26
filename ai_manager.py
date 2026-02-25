@@ -11,7 +11,7 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (Monolith Gemma 3 27B Edition).
+    🧠 AI Manager (Gemma 3 Core + Gemini Flash Ears).
     """
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -23,7 +23,7 @@ class AIManager:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ ИИ успешно подключен (Модель: Gemma 3 27B)")
+                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 3, Уши: Gemini Flash)")
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения ИИ: {e}")
                 
@@ -61,7 +61,7 @@ class AIManager:
 
     async def _call_gemma_for_json(self, prompt: str) -> Optional[dict]:
         try:
-            # Gemma 3 для JSON (креативность 0.1)
+            # Мозг: Gemma 3
             response = self.gemini_client.models.generate_content(
                 model="gemma-3-27b-it", 
                 contents=prompt,
@@ -92,7 +92,7 @@ class AIManager:
         if "GoogleAI" in self.providers:
             try:
                 full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-                # Gemma 3 для ЧАТа (креативность 0.9)
+                # Чат и шутки: Максимально креативная Gemma 3
                 response = self.gemini_client.models.generate_content(
                     model="gemma-3-27b-it",
                     contents=full_prompt,
@@ -105,13 +105,14 @@ class AIManager:
                 
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
 
-    # 🔥 ГОЛОСОВОЕ РАСПОЗНАВАНИЕ ТЕПЕРЬ ТОЖЕ ЧЕРЕЗ GEMMA 3!
+    # 🔥 ИСПРАВЛЕНИЕ ЗДЕСЬ: ВОЗВРАЩАЕМ GEMINI FLASH ТОЛЬКО ДЛЯ СЛУХА
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
             return None
         try:
+            # ⚠️ GEMMA 3 НЕ УМЕЕТ СЛУШАТЬ АУДИО! Используем 2.5-flash только как микрофон.
             response = self.gemini_client.models.generate_content(
-                model='gemma-3-27b-it', # Мультимодальная мощь Джеммы
+                model='gemini-2.5-flash',
                 contents=[
                     types.Part.from_bytes(data=bytes(voice_bytes), mime_type='audio/ogg'),
                     "Транскрибируй это голосовое сообщение в текст. Выведи ТОЛЬКО текст, без кавычек."
@@ -119,8 +120,19 @@ class AIManager:
             )
             return response.text.strip()
         except Exception as e:
-            logger.error(f"❌ Gemma 3 Voice processing failed: {e}")
-            return None
+            logger.error(f"❌ Voice processing failed: {e}")
+            # Резерв на случай, если 2.5-flash заблокирован, пробуем 2.0-flash
+            try:
+                fallback = self.gemini_client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=[
+                        types.Part.from_bytes(data=bytes(voice_bytes), mime_type='audio/ogg'),
+                        "Транскрибируй это."
+                    ]
+                )
+                return fallback.text.strip()
+            except:
+                return None
 
     def _parse_json(self, text: str) -> Optional[dict]:
         try:
