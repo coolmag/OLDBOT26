@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 
 from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
@@ -18,6 +17,7 @@ from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
 
+# Загрузка каталога жанров
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
     MUSIC_CATALOG = json.load(f)
 
@@ -28,8 +28,8 @@ def format_duration(seconds: int) -> str:
     return f"{mins}:{secs:02d}"
 
 def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
+    """Безопасное форматирование текста для Telegram (защита от сломанного Markdown)"""
     icon = random.choice(["🎧", "🎵", "🎶", "📻", "💿"])
-    # Очищаем текст от символов, которые ломают Telegram Markdown
     safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
@@ -52,6 +52,7 @@ def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     extract(MUSIC_CATALOG)
     return random.choice(all_queries) if all_queries else ("top hits", None, "Random")
 
+
 @dataclass
 class RadioSession:
     chat_id: int
@@ -67,9 +68,9 @@ class RadioSession:
     is_running: bool = field(init=False, default=False)
     playlist: List[TrackInfo] = field(default_factory=list)
     played_ids: Set[str] = field(default_factory=set)
-    current_task: Optional[asyncio.Task] = None
+    current_task: Optional[asyncio.Task] = field(init=False, default=None)
     skip_event: asyncio.Event = field(default_factory=asyncio.Event)
-    status_message: Optional[Message] = None
+    status_message: Optional[Message] = field(init=False, default=None)
     _is_searching: bool = field(init=False, default=False)
     last_genre_change: float = field(init=False, default_factory=time.time)
     
@@ -83,6 +84,7 @@ class RadioSession:
         self.is_running = False
         if self.current_task: self.current_task.cancel()
         await self._delete_status()
+        logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
         self.skip_event.set()
@@ -138,17 +140,17 @@ class RadioSession:
     async def _radio_loop(self):
         while self.is_running:
             try:
-                # 🔄 АВТО-РОТАЦИЯ ЖАНРОВ РАЗ В ЧАС (3600 секунд)
+                # 🔄 Ротация жанров раз в час
                 if time.time() - self.last_genre_change > 3600:
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
                     self.last_genre_change = time.time()
                     
-                    # ИИ анонсирует смену жанра
                     prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. Напиши короткий стильный анонс об этом в чат."
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
-                    await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                    if announcement:
+                        await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
                     await asyncio.sleep(2)
 
                 if len(self.playlist) < 3: await self._fill_playlist()
@@ -164,6 +166,32 @@ class RadioSession:
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
+                # 🔥 ИИ-ДИДЖЕЙ: ЖИВОЙ ЭФИР (Генератор форматов)
+                try:
+                    dice = random.random()
+                    if dice < 0.25:
+                        task = f"Расскажи короткий, взрывающий мозг факт про музыкальный жанр '{self.display_name}', а затем круто объяви следующий трек: {track.artist} - {track.title}."
+                    elif dice < 0.50:
+                        task = f"Расскажи короткий музыкальный анекдот или смешную шутку, а потом плавно подведи к треку: {track.artist} - {track.title}."
+                    elif dice < 0.75:
+                        task = f"Вспомни какую-нибудь дикую или легендарную короткую историю из мира музыки, а затем объяви песню: {track.artist} - {track.title}."
+                    else:
+                        task = f"Сделай классную эфирную подводку к треку: {track.artist} - {track.title}. Расскажи короткий интересный факт именно об этом артисте или песне."
+
+                    prompt = f"""Ты в прямом эфире радио! Твоя задача: {task}
+                    ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
+                    1. Отвечай СТРОГО в стиле своей текущей личности.
+                    2. Текст должен быть живым, будто ты говоришь в микрофон.
+                    3. Будь кратким (буквально 2-4 предложения), не пиши поэмы.
+                    4. Не используй скучные шаблоны вроде 'А теперь послушаем'."""
+                    
+                    announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
+                    if announcement:
+                        await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                except Exception as e:
+                    logger.error(f"DJ Intro error: {e}")
+
+                # 🎵 Скачивание и отправка трека
                 success = await self._play_track(track)
                 
                 if success:
@@ -184,32 +212,34 @@ class RadioSession:
         result = None
         if not self.is_running: return False
         try:
-            await self._update_status(f"⬇️ Загрузка: *{track.title[:20]}*...")
+            await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
             result = await self.downloader.download(track.identifier, track_info=track)
             
             if not result or not result.success: return False
             
             caption = get_now_playing_message(track, self.display_name)
             
-            # 🎛 КНОПКИ ПЛЕЕРА И СКИПА
+            # 🎛 ФОРМИРОВАНИЕ КНОПОК ПЛЕЕРА И СКИПА
             markup = None
             if self.chat_type != ChatType.CHANNEL:
                 buttons = []
                 player_url = getattr(self.settings, 'PLAYER_URL', '') or getattr(self.settings, 'BASE_URL', '') or getattr(self.settings, 'WEBHOOK_URL', '').replace('/telegram', '')
                 if player_url: 
                     if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                    # Безопасная кнопка для групп
+                    # ⚠️ ИСПОЛЬЗУЕМ url= ВМЕСТО web_app= ЧТОБЫ РАБОТАЛО В ГРУППАХ
                     buttons.append(InlineKeyboardButton("▶️ Плеер", url=player_url))
                 buttons.append(InlineKeyboardButton("⏭ Скип", callback_data="skip_track"))
                 markup = InlineKeyboardMarkup([buttons])
 
             audio_source = result.file_path
             
+            # 1. Отправка по прямой ссылке (Cobalt)
             if result.is_url:
-                await self.bot.send_audio(self.chat_id, audio=str(audio_source), caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
+                await self.bot.send_audio(self.chat_id, audio=audio_source, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
                 await self._delete_status()
                 return True
 
+            # 2. Отправка из Telegram-кэша (file_id)
             cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
             if cached_file_id:
                 try:
@@ -220,22 +250,22 @@ class RadioSession:
                     logger.warning(f"Failed to send cached file_id: {e}")
                     await self.downloader._cache.delete(f"file_id:{track.identifier}")
 
+            # 3. Отправка скачанного файла с диска
             if audio_source and Path(audio_source).exists():
                 file_path = Path(audio_source)
+                
                 # ⚠️ ФИНАЛЬНАЯ ПРОВЕРКА: Весит ли файл больше 20 МБ?
                 file_size_mb = file_path.stat().st_size / (1024 * 1024)
                 if file_size_mb > 20.0:
                     logger.error(f"[{self.chat_id}] ❌ Трек слишком большой: {file_size_mb:.1f} MB (Лимит 20MB). Пропуск.")
-                    os.unlink(file_path) # Удаляем гиганта, чтобы не забил память
+                    os.unlink(file_path)
                     return False
                 
+                # ⚠️ ОТПРАВКА С БОЛЬШИМИ ТАЙМАУТАМИ (чтобы не отвалилось по NetworkError)
                 with open(audio_source, 'rb') as f:
-                    # Добавлены таймауты, чтобы Railway не обрывал отправку больших файлов
-                    msg = await self.bot.send_audio(
-                        self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, 
-                        reply_markup=markup, read_timeout=120, write_timeout=120
-                    )
+                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=120)
                     if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                
                 await self._delete_status()
                 return True
                 
@@ -245,13 +275,14 @@ class RadioSession:
             await self._handle_forbidden()
             return False
         except Exception as e: 
-            # ТЕПЕРЬ МЫ УВИДИМ ОШИБКУ В ЛОГАХ ЕСЛИ ЧТО-ТО ПОЙДЕТ НЕ ТАК
             logger.error(f"[{self.chat_id}] CRITICAL SEND ERROR: {e}", exc_info=True)
             return False
         finally:
+            # Очистка диска после успешной (или неуспешной) отправки
             if result and not result.is_url and result.file_path and Path(result.file_path).exists():
                 try: os.unlink(result.file_path)
                 except: pass
+
 
 class RadioManager:
     def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager):
