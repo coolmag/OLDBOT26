@@ -11,7 +11,7 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (Gemma 3 Core + Gemini Flash Ears).
+    🧠 AI Manager (Hybrid: Flash for JSON routing, Gemma 3 for Chat/Jokes).
     """
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -23,7 +23,7 @@ class AIManager:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 3, Уши: Gemini Flash)")
+                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 3, Логика/Уши: Gemini Flash)")
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения ИИ: {e}")
                 
@@ -38,7 +38,9 @@ class AIManager:
         
         1. intent: "radio"
         - The user wants a CONTINUOUS STREAM of music.
-        - Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь".
+        - Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
+        - Example 1: "послушаем линкин парк" -> intent: "radio", query: "linkin park"
+        - Example 2: "врубай советский грув" -> intent: "radio", query: "советский грув"
 
         2. intent: "search"
         - The user wants ONE SPECIFIC SONG.
@@ -54,22 +56,23 @@ class AIManager:
         """
 
         if "GoogleAI" in self.providers:
-            res = await self._call_gemma_for_json(prompt)
+            # 🔥 ИСПОЛЬЗУЕМ FLASH ДЛЯ 100% НАДЕЖНОГО JSON
+            res = await self._call_flash_for_json(prompt)
             if res: return res
             
         return self._regex_fallback(text)
 
-    async def _call_gemma_for_json(self, prompt: str) -> Optional[dict]:
+    async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
         try:
-            # Мозг: Gemma 3
+            # ⚠️ Gemini 2.5 Flash идеально парсит JSON
             response = self.gemini_client.models.generate_content(
-                model="gemma-3-27b-it", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
             return self._parse_json(response.text)
         except Exception as e:
-            logger.error(f"❌ Gemma API error (JSON): {e}")
+            logger.error(f"❌ Flash API error (JSON): {e}")
             return None
 
     def _regex_fallback(self, text: str) -> dict:
@@ -80,7 +83,8 @@ class AIManager:
         if any(k in text_lower for k in chat_keywords) and len(text.split()) < 6:
             return {"intent": "chat", "query": None}
             
-        radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'врубай', 'давай', 'послушаем']
+        # ⚠️ ДОБАВИЛИ ВСЕ СЛОВА ДЛЯ РАДИО
+        radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'врубай', 'давай', 'послушаем', 'включи']
         if any(k in text_lower for k in radio_keywords):
             query = text
             for k in radio_keywords: query = query.lower().replace(k, '')
@@ -92,7 +96,7 @@ class AIManager:
         if "GoogleAI" in self.providers:
             try:
                 full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-                # Чат и шутки: Максимально креативная Gemma 3
+                # 🔥 GEMMA 3 ГЕНЕРИРУЕТ ТОЛЬКО ШУТКИ И ЧАТ (Креативность 0.9)
                 response = self.gemini_client.models.generate_content(
                     model="gemma-3-27b-it",
                     contents=full_prompt,
@@ -102,15 +106,18 @@ class AIManager:
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Gemma 3 chat failed: {e}")
-                
+                # Если Gemma упала, страхует Flash
+                try:
+                    response = self.gemini_client.models.generate_content(model="gemini-2.5-flash", contents=full_prompt, config=types.GenerateContentConfig(temperature=0.9))
+                    return response.text
+                except: pass
+
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
 
-    # 🔥 ИСПРАВЛЕНИЕ ЗДЕСЬ: ВОЗВРАЩАЕМ GEMINI FLASH ТОЛЬКО ДЛЯ СЛУХА
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
             return None
         try:
-            # ⚠️ GEMMA 3 НЕ УМЕЕТ СЛУШАТЬ АУДИО! Используем 2.5-flash только как микрофон.
             response = self.gemini_client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=[
@@ -121,18 +128,7 @@ class AIManager:
             return response.text.strip()
         except Exception as e:
             logger.error(f"❌ Voice processing failed: {e}")
-            # Резерв на случай, если 2.5-flash заблокирован, пробуем 2.0-flash
-            try:
-                fallback = self.gemini_client.models.generate_content(
-                    model='gemini-2.0-flash',
-                    contents=[
-                        types.Part.from_bytes(data=bytes(voice_bytes), mime_type='audio/ogg'),
-                        "Транскрибируй это."
-                    ]
-                )
-                return fallback.text.strip()
-            except:
-                return None
+            return None
 
     def _parse_json(self, text: str) -> Optional[dict]:
         try:
