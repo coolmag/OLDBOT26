@@ -193,8 +193,3 @@ if not static_dir.exists():
     
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
-if __name__ == "__main__":
-    import uvicorn
-    # На Railway мы берем порт из переменной окружения
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
