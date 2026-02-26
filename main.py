@@ -1,9 +1,9 @@
-# Version: 4.0 - Masterpiece 2026
-import logging
 import asyncio
-from contextlib import asynccontextmanager
+import logging
 import shutil
 import os
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -14,15 +14,58 @@ from telegram.ext import Application
 
 from config import get_settings
 from logging_setup import setup_logging
-from radio import RadioManager
+from ai_manager import AIManager
 from youtube import YouTubeDownloader
 from spotify import SpotifyService
-from handlers import setup_handlers
-from cache_service import CacheService
-from ai_manager import AIManager
+from radio import RadioManager
 from chat_service import ChatManager
+from cache_service import CacheService
+from handlers import setup_handlers
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("main")
+
+# ⚠️ ВСЕ ТЯЖЕЛЫЕ ПРОЦЕССЫ ВЫНЕСЕНЫ В ФОН
+async def lazy_startup_tasks(app: FastAPI):
+    logger.info("⏳ Ленивая инициализация сервисов в фоне...")
+    settings = app.state.settings
+    
+    # 1. Запуск прокси-демона (Если он есть в твоей архитектуре)
+    # Если ты решил оставить прокси, раскомментируй эти строки:
+    # from proxy_service import ProxyManager
+    # proxy_manager = ProxyManager(settings.V2RAY_PROXIES_FILE)
+    # await proxy_manager.start_daemon()
+    # app.state.proxy_manager = proxy_manager
+    
+    # 2. Подключение к Telegram
+    tg_app = app.state.tg_app
+    commands = [
+        BotCommand("radio", "🎲 Случайная волна"), 
+        BotCommand("play", "🔎 Найти трек"), 
+        BotCommand("skip", "⏭ Следующий трек"), 
+        BotCommand("stop", "🛑 Остановить"), 
+        BotCommand("admin", "⚙️ Настройки"),
+        BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
+    ]
+    
+    connected = False
+    attempt = 1
+    while not connected:
+        try:
+            await tg_app.bot.set_my_commands(commands)
+            await tg_app.initialize()
+            await tg_app.start()
+            
+            if settings.WEBHOOK_URL:
+                await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL)
+                logger.info(f"🔗 Webhook set to: {settings.WEBHOOK_URL}")
+            
+            connected = True
+            logger.info("🚀 Бот успешно подключен к Telegram API!")
+        except Exception as e:
+            logger.warning(f"⚠️ Сеть недоступна (Попытка {attempt}). Ждем 5 сек... Ошибка: {e}")
+            attempt += 1
+            await asyncio.sleep(5)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,10 +73,11 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     
-    logger.info("⚡ System Starting Up (Cobalt Engine)...")
+    logger.info("⚡ System Starting Up (Railway Edition)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg detected.")
     else: logger.warning("⚠️ FFmpeg not found!")
 
+    # Кэш и ИИ стартуют быстро, их оставляем
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
     
@@ -46,7 +90,6 @@ async def lifespan(app: FastAPI):
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
     
-    # ВНИМАНИЕ: Передаем chat_manager в радио
     radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
     
     tg_app.ai_manager = ai_manager
@@ -59,94 +102,99 @@ async def lifespan(app: FastAPI):
     
     setup_handlers(tg_app)
     
-    commands = [BotCommand("radio", "🎲 Случайная волна"), BotCommand("play", "🔎 Найти трек"), BotCommand("skip", "⏭ Следующий трек"), BotCommand("stop", "🛑 Остановить"), BotCommand("admin", "⚙️ Настройки")]
-    await tg_app.bot.set_my_commands(commands)
-    
-    await tg_app.initialize()
-    await tg_app.start()
-    
-    if settings.WEBHOOK_URL:
-        await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL)
-        logger.info(f"🔗 Webhook set to: {settings.WEBHOOK_URL}")
-    
     app.state.tg_app = tg_app
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
     
+    # 🔥 МАГИЯ: Отпускаем блокировку, запускаем всё остальное в фоне
+    startup_task = asyncio.create_task(lazy_startup_tasks(app))
+    
     yield
     
     logger.info("🔻 System Shutting Down...")
+    startup_task.cancel()
+    # Если используешь прокси, раскомментируй строку ниже:
+    # if hasattr(app.state, 'proxy_manager'): await app.state.proxy_manager.stop_daemon()
     await radio_manager.stop_all()
     await tg_app.stop()
     await tg_app.shutdown()
     await cache.close()
 
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+
+# ⚠️ ТОТ САМЫЙ ЭНДПОИНТ ДЛЯ RAILWAY HEALTHCHECK
 @app.get("/api/health")
 async def health_check():
-    """Railway Health Check Endpoint"""
-    return {"status": "ok", "engine": "Aurora v3.1"}
+    return {"status": "ok", "engine": "Aurora v3.2"}
 
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    tg_app = request.app.state.tg_app
     try:
-        update = Update.de_json(await request.json(), tg_app.bot)
+        tg_app = request.app.state.tg_app
+        data = await request.json()
+        update = Update.de_json(data, tg_app.bot)
         await tg_app.process_update(update)
+        return JSONResponse(status_code=200, content={"status": "ok"})
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}", exc_info=True)
-    return {"ok": True}
+        logger.error(f"Webhook error: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.get("/api/player/playlist")
+async def get_playlist(query: str, request: Request):
+    try:
+        downloader = request.app.state.downloader
+        tracks = await downloader.search(query, limit=20)
+        return {"playlist": [t.__dict__ for t in tracks]}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.get("/stream/{video_id}")
+async def stream_audio(video_id: str, request: Request):
+    downloader = request.app.state.downloader
+    final_path = request.app.state.settings.DOWNLOADS_DIR / f"{video_id}.mp3"
+    
+    if final_path.exists():
+        return FileResponse(path=final_path, media_type="audio/mpeg", headers={"Accept-Ranges": "bytes"})
+        
+    res = await downloader.download(video_id)
+    if res.success and res.file_path:
+        return FileResponse(path=res.file_path, media_type="audio/mpeg", headers={"Accept-Ranges": "bytes"})
+    
+    return JSONResponse(status_code=404, content={"error": "Not found"})
 
 @app.get("/api/ai/dj")
 async def api_ai_dj(prompt: str, request: Request):
-    """Эндпоинт для ИИ-диджея в веб-плеере"""
     chat_manager = request.app.state.chat_manager
     ai_manager = request.app.state.tg_app.ai_manager
     downloader = request.app.state.downloader
     
-    # 1. Получаем разговорный ответ ИИ (с шутками и стилем персоны)
-    # Используем chat_id = 0 для веб-плеера (чтобы бралась дефолтная персона или последняя установленная)
     ai_message = await chat_manager.get_response(0, prompt, "Слушатель")
     
-    # 2. Анализируем, что именно нужно найти
     analysis = await ai_manager.analyze_message(prompt)
     query = analysis.get("query") or prompt
     
-    # 3. Ищем треки
     tracks = await downloader.search(query=query, limit=15)
     if tracks:
         for track in tracks[:3]:
             asyncio.create_task(downloader.download(track.identifier, track))
             
-    # Возвращаем и плейлист, и текст для озвучки!
     return {"playlist": tracks, "message": ai_message}
 
-# Глушилка для favicon, чтобы не засорять логи 404 ошибкой
 @app.get("/favicon.ico")
 async def favicon():
     return JSONResponse(status_code=200, content={"status": "ok"})
 
-@app.get("/api/player/playlist")
-async def get_playlist(query: str, request: Request):
-    downloader = request.app.state.downloader
-    tracks = await downloader.search(query=query, limit=15)
-    if tracks:
-        for track in tracks[:3]:
-            asyncio.create_task(downloader.download(track.identifier, track))
-    return {"playlist": tracks}
+static_dir = Path("static")
+if not static_dir.exists():
+    static_dir.mkdir()
     
-@app.get("/stream/{video_id}")
-async def stream_audio(video_id: str, request: Request):
-    downloader = request.app.state.downloader
-    download_result = await downloader.download(video_id)
-    
-    if download_result and download_result.success and download_result.file_path:
-        logger.info(f"Serving local file: {download_result.file_path}")
-        return FileResponse(download_result.file_path, media_type="audio/mpeg")
-
-    return JSONResponse(status_code=404, content={"error": "Track not available"})
-
-# Mount static files AFTER API routes
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+if __name__ == "__main__":
+    import uvicorn
+    # На Railway мы берем порт из переменной окружения
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
