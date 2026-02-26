@@ -9,8 +9,6 @@
     "healthcheckTimeout": 100
   },
   "nixpacks": {
-    "packages": [
-      "ffmpeg"
-    ]
+    "packages": ["ffmpeg"]
   }
 }
