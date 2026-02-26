@@ -5,6 +5,7 @@ import json
 import random
 import re
 import os
+import time # ⚠️ ВОТ ЭТОТ ИМПОРТ МЫ ДОБАВИЛИ ДЛЯ ВИКТОРИНЫ
 from difflib import SequenceMatcher # ⚠️ ДЛЯ ПРОЩЕНИЯ ОПЕЧАТОК!
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
