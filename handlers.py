@@ -216,7 +216,6 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = await context.bot.send_message(chat_id, "🎲 <i>Настраиваю аппаратуру для викторины...</i>", parse_mode=ParseMode.HTML)
 
-    # Список популярных запросов для генерации случайного трека
     queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "queen", "nirvana", "t.a.t.u.", "моргенштерн", "сектор газа", "zivert", "скриптонит"]
     downloader = context.application.downloader
     tracks = await downloader.search(random.choice(queries), limit=5)
@@ -234,33 +233,40 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     info = dl_res.track_info
     input_file = str(dl_res.file_path)
-    output_file = input_file.replace(".mp3", "_quiz.ogg")
     
-    # Вырезаем 10 секунд из середины трека (или начала, если трек короткий)
+    # Жесткий локальный путь для сохранения фрагмента
+    settings = context.application.settings
+    output_file = str(settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
+    
     start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
 
     try:
-        # FFMPEG: Конвертируем кусок MP3 в Голосовое сообщение Telegram (OPUS)
-        cmd = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '10', '-c:a', 'libopus', '-b:a', '32k', output_file]
+        # 🔥 САМАЯ БЕЗОПАСНАЯ КОМАНДА FFMPEG ДЛЯ RAILWAY
+        # Никаких сложных кодеков. Просто берем кусок и пакуем в OGG для Телеграма
+        cmd = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', '-c:a', 'copy', output_file]
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.wait()
 
-        if not os.path.exists(output_file): 
-            raise Exception("FFmpeg failed to create ogg")
+        # Если copy не сработал (редко бывает из-за кривого исходника), режем самым базовым mp3 кодеком
+        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0: 
+            cmd_fallback = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', output_file]
+            proc2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc2.wait()
+            
+            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
+                raise Exception("FFmpeg failed to slice audio")
 
         await msg.delete()
 
-        # ИИ Объявляет старт игры
-        prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 10 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
+        prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 15 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
         announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
         if announcement: 
             await context.bot.send_message(chat_id, f"🎙 {announcement}")
 
-        # Отправляем кружок (голосовуху)
+        # Отправляем кружок-голосовуху!
         with open(output_file, 'rb') as f:
             await context.bot.send_voice(chat_id, voice=f)
 
-        # Сохраняем правильный ответ в память чата
         context.chat_data['quiz_active'] = True
         context.chat_data['quiz_artist'] = info.artist
         context.chat_data['quiz_title'] = info.title
@@ -268,20 +274,22 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"Quiz error: {e}")
-        await context.bot.send_message(chat_id, "❌ Сбой аппаратуры при создании викторины (убедитесь что установлен ffmpeg).")
+        await context.bot.send_message(chat_id, "❌ Сбой аппаратуры при создании викторины. Возможно, трек заблокирован для нарезки.")
         context.chat_data['quiz_active'] = False
     finally:
         # Убираем за собой мусор
-        if os.path.exists(input_file): os.unlink(input_file)
-        if os.path.exists(output_file): os.unlink(output_file)
+        if os.path.exists(input_file): 
+            try: os.unlink(input_file)
+            except: pass
+        if os.path.exists(output_file): 
+            try: os.unlink(output_file)
+            except: pass
 
-    # Запускаем таймер на 30 секунд
+    # Таймер окончания игры
     if context.chat_data.get('quiz_active'):
         await asyncio.sleep(30)
-        # Если через 30 секунд статус все еще True, значит никто не угадал
         if context.chat_data.get('quiz_active'):
             context.chat_data['quiz_active'] = False
-            # ИИ "Прожаривает" игроков за проигрыш
             prompt = f"Время вышло, и никто не угадал песню! Это был трек: {context.chat_data['quiz_full']}. Высмей их музыкальный вкус и медлительность в своем стиле. Жестко, но смешно."
             roast = await context.application.chat_manager.get_response(chat_id, prompt, "System")
             await context.bot.send_message(chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
