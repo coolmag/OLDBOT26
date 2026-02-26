@@ -16,7 +16,6 @@ from config import get_settings
 from logging_setup import setup_logging
 from ai_manager import AIManager
 from youtube import YouTubeDownloader
-from spotify import SpotifyService
 from radio import RadioManager
 from chat_service import ChatManager
 from cache_service import CacheService
@@ -28,16 +27,8 @@ logger = logging.getLogger("main")
 async def lazy_startup_tasks(app: FastAPI):
     logger.info("⏳ Ленивая инициализация сервисов в фоне...")
     settings = app.state.settings
-    
-    # 1. Запуск прокси-демона (Если он есть в твоей архитектуре)
-    # Если ты решил оставить прокси, раскомментируй эти строки:
-    # from proxy_service import ProxyManager
-    # proxy_manager = ProxyManager(settings.V2RAY_PROXIES_FILE)
-    # await proxy_manager.start_daemon()
-    # app.state.proxy_manager = proxy_manager
-    
-    # 2. Подключение к Telegram
     tg_app = app.state.tg_app
+    
     commands = [
         BotCommand("radio", "🎲 Случайная волна"), 
         BotCommand("play", "🔎 Найти трек"), 
@@ -73,11 +64,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     
-    logger.info("⚡ System Starting Up (Railway Edition)...")
+    logger.info("⚡ System Starting Up (Railway Docker Edition)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg detected.")
     else: logger.warning("⚠️ FFmpeg not found!")
 
-    # Кэш и ИИ стартуют быстро, их оставляем
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
     
@@ -85,7 +75,6 @@ async def lifespan(app: FastAPI):
     chat_manager = ChatManager(ai_manager)
     
     downloader = YouTubeDownloader(settings, cache)
-    spotify_service = SpotifyService(settings, downloader)
     
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
@@ -96,7 +85,6 @@ async def lifespan(app: FastAPI):
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
     tg_app.radio_manager = radio_manager
-    tg_app.spotify_service = spotify_service
     tg_app.settings = settings
     tg_app.cache = cache
     
@@ -106,15 +94,13 @@ async def lifespan(app: FastAPI):
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
     
-    # 🔥 МАГИЯ: Отпускаем блокировку, запускаем всё остальное в фоне
+    # 🔥 МАГИЯ: Запускаем подключение к ТГ в фоне
     startup_task = asyncio.create_task(lazy_startup_tasks(app))
     
     yield
     
     logger.info("🔻 System Shutting Down...")
     startup_task.cancel()
-    # Если используешь прокси, раскомментируй строку ниже:
-    # if hasattr(app.state, 'proxy_manager'): await app.state.proxy_manager.stop_daemon()
     await radio_manager.stop_all()
     await tg_app.stop()
     await tg_app.shutdown()
@@ -125,10 +111,9 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
-# ⚠️ ТОТ САМЫЙ ЭНДПОИНТ ДЛЯ RAILWAY HEALTHCHECK
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "engine": "Aurora v3.2"}
+    return {"status": "ok", "engine": "Aurora Docker v3.5"}
 
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
@@ -193,3 +178,4 @@ if not static_dir.exists():
     
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
+# Никаких if __name__ == "__main__": здесь больше нет!
