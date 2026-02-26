@@ -5,7 +5,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Устанавливаем системные пакеты (ffmpeg критически важен для викторины)
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ffmpeg libopus-dev && rm -rf /var/lib/apt/lists/*
 
 # Копируем зависимости
 COPY requirements.txt .

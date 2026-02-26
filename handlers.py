@@ -233,7 +233,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
     elif intent == 'chat': await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
 
-# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ" (Связь с Радио)
+# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ" (Исправлено для мобилок)
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     session = context.application.radio_manager._sessions.get(chat_id)
@@ -247,7 +247,84 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     session.last_quiz_time = time.time() # Сбрасываем авто-таймер
-    asyncio.create_task(session.run_quiz())
+    msg = await context.bot.send_message(chat_id, "🎲 <i>Настраиваю аппаратуру для викторины...</i>", parse_mode=ParseMode.HTML)
+
+    queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "queen", "nirvana", "t.a.t.u.", "моргенштерн", "сектор газа", "zivert", "скриптонит"]
+    downloader = context.application.downloader
+    tracks = await downloader.search(random.choice(queries), limit=5)
+
+    if not tracks:
+        await msg.edit_text("❌ Не удалось найти трек для викторины. Попробуйте еще раз.")
+        return
+
+    track = random.choice(tracks[:3])
+    dl_res = await downloader.download(track.identifier, track)
+
+    if not dl_res.success or not dl_res.file_path:
+        await msg.edit_text("❌ Ошибка загрузки секретного трека.")
+        return
+
+    info = dl_res.track_info
+    input_file = str(dl_res.file_path)
+    
+    settings = context.application.settings
+    output_file = str(settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
+    
+    start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
+
+    try:
+        # ⚠️ ЖЕСТКИЙ СТАНДАРТ TELEGRAM VOICE ДЛЯ СМАРТФОНОВ
+        # -ac 1 (Моно звук), -ar 48000 (Частота 48kHz), -c:a libopus (кодек Opus)
+        cmd = [
+            'ffmpeg', '-y', '-i', input_file, 
+            '-ss', str(start_time), '-t', '15', 
+            '-c:a', 'libopus', '-b:a', '32k', 
+            '-ac', '1', '-ar', '48000', 
+            output_file
+        ]
+        
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await proc.wait()
+
+        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
+            raise Exception("FFmpeg failed to create valid Opus file")
+
+        await msg.delete()
+
+        prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 15 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
+        announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
+        if announcement: 
+            await context.bot.send_message(chat_id, f"🎙 {announcement}")
+
+        # Отправляем 100% совместимую голосовуху
+        with open(output_file, 'rb') as f:
+            await context.bot.send_voice(chat_id, voice=f)
+
+        context.chat_data['quiz_active'] = True
+        context.chat_data['quiz_artist'] = info.artist
+        context.chat_data['quiz_title'] = info.title
+        context.chat_data['quiz_full'] = f"{info.artist} - {info.title}"
+
+    except Exception as e:
+        logger.error(f"Quiz error: {e}")
+        await context.bot.send_message(chat_id, "❌ Сбой аппаратуры при создании викторины.")
+        context.chat_data['quiz_active'] = False
+    finally:
+        if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_file): 
+            try: os.unlink(input_file)
+            except: pass
+        if os.path.exists(output_file): 
+            try: os.unlink(output_file)
+            except: pass
+
+    # Таймер окончания игры
+    if context.chat_data.get('quiz_active'):
+        await asyncio.sleep(30)
+        if context.chat_data.get('quiz_active'):
+            context.chat_data['quiz_active'] = False
+            prompt = f"Время вышло, и никто не угадал песню! Это был трек: {context.chat_data['quiz_full']}. Высмей их музыкальный вкус и медлительность в своем стиле. Жестко, но смешно."
+            roast = await context.application.chat_manager.get_response(chat_id, prompt, "System")
+            await context.bot.send_message(chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
