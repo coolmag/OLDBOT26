@@ -31,30 +31,34 @@ GREETINGS = {
     "news": ["В эфире экстренный выпуск новостей музыки. 📰", "Сводка новостей: вы подключились. 📡"]
 }
 
-# 🔥 АЛГОРИТМ "ПРОЩЕНИЯ ОПЕЧАТОК" (Fuzzy Matching)
+# 🔥 АЛГОРИТМ "ПРОЩЕНИЯ ОПЕЧАТОК" (Super Fuzzy Matching)
 def is_fuzzy_match(user_input: str, target: str) -> bool:
     if not user_input or not target: return False
-    user_input = user_input.lower()
+    user_input = user_input.lower().strip()
     target = target.lower()
     
     # Убираем все скобки (Remix, feat) из оригинала
     target_clean = re.sub(r'\(.*?\)|\[.*?\]', '', target)
     words = target_clean.split()
-    words.append(target_clean.replace(" ", "")) # Целая строка без пробелов
     
-    user_clean = user_input.replace(" ", "")
-    
-    if len(user_clean) < 4:
-        return user_clean in words
-        
+    # Если юзер ввел ровно то же самое (или одно из слов артиста/трека)
     for w in words:
         w_clean = ''.join(c for c in w if c.isalnum())
-        if not w_clean: continue
-        # Если юзер ввел часть слова
-        if user_clean in w_clean: return True
-        # Если опечатка (например "моргин" совпадает с "морген" на 85%)
-        if SequenceMatcher(None, user_clean, w_clean).ratio() >= 0.75:
+        if not w_clean or len(w_clean) < 3: continue
+        
+        # Юзер ввел "Асти", а артист "Anna Asti" - Зачет!
+        if user_input in w_clean or w_clean in user_input: return True
+        
+        # Если юзер ошибся в одной-двух буквах ("Лабода" вместо "Loboda")
+        if SequenceMatcher(None, user_input, w_clean).ratio() >= 0.70:
             return True
+            
+    # Проверка целиком (на всякий случай)
+    target_full = ''.join(c for c in target_clean if c.isalnum())
+    user_full = ''.join(c for c in user_input if c.isalnum())
+    if user_full in target_full or SequenceMatcher(None, user_full, target_full).ratio() >= 0.75:
+        return True
+        
     return False
 
 # --- Internal Action Functions ---
@@ -178,36 +182,37 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message_text = message.text
 
-    # 🎮 ПРИОРИТЕТ 1: ЕСЛИ ИДЕТ ВИКТОРИНА - ЭТО ОТВЕТ, А НЕ ЗАПРОС ИИ!
+    # 🎮 АБСОЛЮТНАЯ ИЗОЛЯЦИЯ ВИКТОРИНЫ
     session = context.application.radio_manager._sessions.get(chat_id)
     if session and getattr(session, 'quiz_active', False):
         artist = session.quiz_artist
         title = session.quiz_title
 
-        is_match = False
-        if is_fuzzy_match(message_text, artist) or is_fuzzy_match(message_text, title):
-            is_match = True
+        # Если сообщение начинается со слеша (команда), пропускаем его
+        if message_text.startswith('/'):
+            pass 
+        else:
+            is_match = False
+            if is_fuzzy_match(message_text, artist) or is_fuzzy_match(message_text, title):
+                is_match = True
 
-        if is_match:
-            session.quiz_active = False # Останавливаем игру
+            if is_match:
+                session.quiz_active = False # Останавливаем игру
+                
+                user_id = update.effective_user.id
+                winner_name = update.effective_user.first_name
+                if 'scores' not in context.chat_data: context.chat_data['scores'] = {}
+                context.chat_data['scores'][user_id] = context.chat_data['scores'].get(user_id, 0) + 1
+                score = context.chat_data['scores'][user_id]
+                
+                prompt = f"В нашей викторине пользователь {winner_name} только что первым угадал песню! Это был трек: {session.quiz_full}. Похвали его очень круто в своем стиле и скажи, что у него теперь {score} очков!"
+                announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
+                await context.bot.send_message(chat_id, f"🎉 🎙 {announcement}")
             
-            user_id = update.effective_user.id
-            winner_name = update.effective_user.first_name
-            if 'scores' not in context.chat_data: context.chat_data['scores'] = {}
-            context.chat_data['scores'][user_id] = context.chat_data['scores'].get(user_id, 0) + 1
-            score = context.chat_data['scores'][user_id]
-            
-            prompt = f"В нашей викторине пользователь {winner_name} только что первым угадал песню! Это был трек: {session.quiz_full}. Похвали его очень круто в своем стиле и скажи, что у него теперь {score} очков!"
-            announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-            await context.bot.send_message(chat_id, f"🎉 🎙 {announcement}")
+            # ⚠️ ЩИТ: Игра идет, но ответ неверный? Мы просто убиваем сообщение. 
+            # Оно не пойдет в ИИ и не будет качать случайные треки!
             return
-            
-        # ⚠️ Если идет игра, но ответ неверный - мы ПРОСТО ИГНОРИРУЕМ ТЕКСТ. 
-        # Не отдаем его ИИ, чтобы не включались другие песни!
-        return 
 
-    # --- Стандартная обработка, если игры нет ---
-    
     if "open.spotify.com/track" in message_text:
         match = re.search(r'(https?://open\.spotify\.com/track/[a-zA-Z0-9]+)', message_text)
         if match: await _do_spotify_play(chat_id, match.group(1), context)
