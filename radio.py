@@ -69,7 +69,15 @@ class RadioSession:
     skip_event: asyncio.Event = field(default_factory=asyncio.Event)
     status_message: Optional[Message] = field(init=False, default=None)
     _is_searching: bool = field(init=False, default=False)
+    
     last_genre_change: float = field(init=False, default_factory=time.time)
+    
+    # 🔥 ПАРАМЕТРЫ ДЛЯ ВИКТОРИНЫ
+    quiz_active: bool = field(init=False, default=False)
+    quiz_artist: str = field(init=False, default="")
+    quiz_title: str = field(init=False, default="")
+    quiz_full: str = field(init=False, default="")
+    last_quiz_time: float = field(init=False, default_factory=time.time)
     
     async def start(self):
         if self.is_running: return
@@ -80,8 +88,8 @@ class RadioSession:
     async def stop(self):
         self.is_running = False
         if self.current_task: self.current_task.cancel()
+        self.quiz_active = False
         await self._delete_status()
-        logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
         self.skip_event.set()
@@ -134,24 +142,99 @@ class RadioSession:
             else: self.played_ids.clear()
         self._is_searching = False
 
+    # 🎮 ЛОГИКА АВТОМАТИЧЕСКОЙ ВИКТОРИНЫ
+    async def run_quiz(self):
+        try:
+            self.quiz_active = True
+            await self._update_status("🎲 <i>Настраиваю аппаратуру для викторины...</i>")
+            
+            queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "queen", "nirvana", "t.a.t.u.", "моргенштерн", "сектор газа", "zivert", "скриптонит"]
+            tracks = await self.downloader.search(random.choice(queries), limit=5)
+            if not tracks:
+                self.quiz_active = False
+                return
+                
+            track = random.choice(tracks[:3])
+            dl_res = await self.downloader.download(track.identifier, track)
+            if not dl_res.success or not dl_res.file_path:
+                self.quiz_active = False
+                return
+                
+            info = dl_res.track_info
+            input_file = str(dl_res.file_path)
+            output_file = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
+            start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
+            
+            cmd = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', '-c:a', 'copy', output_file]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc.wait()
+            
+            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0: 
+                cmd_fallback = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', output_file]
+                proc2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await proc2.wait()
+                
+            await self._delete_status()
+            
+            prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 15 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
+            announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
+            if announcement: 
+                await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                
+            with open(output_file, 'rb') as f:
+                await self.bot.send_voice(self.chat_id, voice=f)
+                
+            self.quiz_artist = info.artist
+            self.quiz_title = info.title
+            self.quiz_full = f"{info.artist} - {info.title}"
+            
+            # Ждем 30 секунд ответа от пользователей
+            await asyncio.sleep(30)
+            
+            # Если статус все еще True, значит никто не угадал
+            if self.quiz_active:
+                self.quiz_active = False
+                prompt = f"Время вышло, никто не угадал песню! Это был трек: {self.quiz_full}. Высмей их музыкальный вкус в своем стиле."
+                roast = await self.chat_manager.get_response(self.chat_id, prompt, "System")
+                await self.bot.send_message(self.chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
+                
+        except Exception as e:
+            logger.error(f"Quiz run error: {e}")
+            self.quiz_active = False
+        finally:
+            if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_file): 
+                try: os.unlink(input_file)
+                except: pass
+            if os.path.exists(output_file): 
+                try: os.unlink(output_file)
+                except: pass
+
+
     async def _radio_loop(self):
         while self.is_running:
             try:
-                # 🔄 Ротация жанров И ХАРАКТЕРА ИИ раз в час
+                # ⏸ ЕСЛИ ИДЕТ ВИКТОРИНА - РАДИО СТОИТ НА ПАУЗЕ!
+                if self.quiz_active:
+                    await asyncio.sleep(2)
+                    continue
+
+                # 🎮 АВТО-ВИКТОРИНА РАЗ В 30 МИНУТ
+                if time.time() - self.last_quiz_time > 1800:
+                    self.last_quiz_time = time.time()
+                    await self.run_quiz()
+                    continue
+
                 if time.time() - self.last_genre_change > 3600:
                     from radio import get_random_catalog_query 
-                    from ai_personas import PERSONAS # Загружаем список личностей
-                    
-                    # 1. Меняем музыку
+                    from ai_personas import PERSONAS 
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
                     self.last_genre_change = time.time()
                     
-                    # 2. 🔥 АВТО-СМЕНА ХАРАКТЕРА ИИ
                     available_modes = list(PERSONAS.keys())
                     new_mode = random.choice(available_modes)
-                    self.chat_manager.set_mode(self.chat_id, new_mode) # Устанавливаем новую личность
+                    self.chat_manager.set_mode(self.chat_id, new_mode)
                     
                     prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. А еще у меня внезапно сменилось настроение на 100%! Напиши классный, сбивающий с толку анонс об этом в чат в своем стиле."
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
@@ -170,24 +253,18 @@ class RadioSession:
 
                 track = self.playlist.pop(0)
 
-                # ⚡️ ШАГ 1: ТИХАЯ ЗАГРУЗКА (БЕЗ АНОНСОВ)
                 await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
                 result = await self.downloader.download(track.identifier, track_info=track)
                 
-                # ⚡️ ШАГ 2: ЖЕСТКАЯ ПРОВЕРКА НА БРАК
                 is_valid_file = False
                 if result and result.success:
                     if result.is_url or await self.downloader._cache.get(f"file_id:{track.identifier}"):
                         is_valid_file = True
                     elif result.file_path and Path(result.file_path).exists():
                         file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
-                        if file_size_mb <= 20.0:
-                            is_valid_file = True
-                        else:
-                            logger.error(f"[{self.chat_id}] ❌ Трек {track.title} весит {file_size_mb:.1f} MB (>20MB). Удаляем.")
-                            os.unlink(result.file_path)
+                        if file_size_mb <= 20.0: is_valid_file = True
+                        else: os.unlink(result.file_path)
 
-                # ЕСЛИ ТРЕК БРАКОВАННЫЙ ИЛИ НЕ НАЙДЕН - ПРОПУСКАЕМ МОЛЧА!
                 if not is_valid_file:
                     await self._delete_status()
                     continue
@@ -195,7 +272,6 @@ class RadioSession:
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
-                # ⚡️ ШАГ 3: ИИ ОТКРЫВАЕТ РОТ ТОЛЬКО КОГДА ТРЕК УЖЕ ЛЕЖИТ НА СЕРВЕРЕ
                 try:
                     topics = [
                         "смешную сплетню (можно выдуманную) про",
@@ -221,7 +297,6 @@ class RadioSession:
                 except Exception as e:
                     logger.error(f"DJ Intro error: {e}")
 
-                # ⚡️ ШАГ 4: ОТПРАВКА ИДЕАЛЬНОГО ТРЕКА В ЧАТ
                 success = await self._send_track(track, result)
                 
                 if success:
@@ -235,10 +310,8 @@ class RadioSession:
         self.is_running = False
 
     async def _send_track(self, track: TrackInfo, result: DownloadResult) -> bool:
-        """Метод выделен только для чистой отправки готового файла"""
         try:
             caption = get_now_playing_message(track, self.display_name)
-            
             markup = None
             if self.chat_type != ChatType.CHANNEL:
                 buttons = []
@@ -271,7 +344,6 @@ class RadioSession:
                     if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 await self._delete_status()
                 return True
-                
             return False
             
         except Forbidden: 

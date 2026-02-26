@@ -5,15 +5,14 @@ import json
 import random
 import re
 import os
-from pathlib import Path
+from difflib import SequenceMatcher # ⚠️ ДЛЯ ПРОЩЕНИЯ ОПЕЧАТОК!
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
     MessageHandler, filters
 )
-
 from ai_personas import PERSONAS
 
 logger = logging.getLogger("handlers")
@@ -31,13 +30,31 @@ GREETINGS = {
     "news": ["В эфире экстренный выпуск новостей музыки. 📰", "Сводка новостей: вы подключились. 📡"]
 }
 
-def clean_str(s: str) -> str:
-    """Очищает строку от мусора для честного сравнения в Викторине"""
-    if not s: return ""
-    # Убираем все скобки и их содержимое (например, "Remix", "feat.")
-    s = re.sub(r'\(.*?\)|\[.*?\]', '', s)
-    # Оставляем только буквы и цифры
-    return ''.join(c for c in s.lower() if c.isalnum())
+# 🔥 АЛГОРИТМ "ПРОЩЕНИЯ ОПЕЧАТОК" (Fuzzy Matching)
+def is_fuzzy_match(user_input: str, target: str) -> bool:
+    if not user_input or not target: return False
+    user_input = user_input.lower()
+    target = target.lower()
+    
+    # Убираем все скобки (Remix, feat) из оригинала
+    target_clean = re.sub(r'\(.*?\)|\[.*?\]', '', target)
+    words = target_clean.split()
+    words.append(target_clean.replace(" ", "")) # Целая строка без пробелов
+    
+    user_clean = user_input.replace(" ", "")
+    
+    if len(user_clean) < 4:
+        return user_clean in words
+        
+    for w in words:
+        w_clean = ''.join(c for c in w if c.isalnum())
+        if not w_clean: continue
+        # Если юзер ввел часть слова
+        if user_clean in w_clean: return True
+        # Если опечатка (например "моргин" совпадает с "морген" на 85%)
+        if SequenceMatcher(None, user_clean, w_clean).ratio() >= 0.75:
+            return True
+    return False
 
 # --- Internal Action Functions ---
 
@@ -70,7 +87,6 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
                 try:
                     info = dl_res.track_info
                     
-                    # ИИ Подводка "Стол заказов"
                     if dedication:
                         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
                         prompt = f"Ты в прямом эфире радио! Пользователь заказал трек '{info.artist} - {info.title}' и оставил послание: '{dedication}'. Сделай крутую подводку к треку и передай это послание от себя в своем уникальном стиле! Будь кратким."
@@ -136,6 +152,13 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         intent, query = analysis.get("intent"), analysis.get("query")
         user_name = update.effective_user.first_name
         
+        # Если идет игра, перехватываем голос как ответ на викторину!
+        session = context.application.radio_manager._sessions.get(chat_id)
+        if session and session.quiz_active:
+            update.effective_message.text = transcribed_text # Подменяем текст для текстового хендлера
+            await text_handler(update, context)
+            return
+
         if intent == 'search' and query:
             if "|" in query:
                 q, d = query.split("|", 1)
@@ -154,33 +177,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message_text = message.text
 
-    # 🎮 ПРОВЕРКА ОТВЕТОВ НА ВИКТОРИНУ
-    if context.chat_data.get('quiz_active'):
-        msg_clean = clean_str(message_text)
-        artist_clean = clean_str(context.chat_data.get('quiz_artist', ''))
-        title_clean = clean_str(context.chat_data.get('quiz_title', ''))
+    # 🎮 УМНАЯ ПРОВЕРКА ОТВЕТОВ НА ВИКТОРИНУ С ПРОЩЕНИЕМ ОПЕЧАТОК
+    session = context.application.radio_manager._sessions.get(chat_id)
+    if session and getattr(session, 'quiz_active', False):
+        artist = session.quiz_artist
+        title = session.quiz_title
 
-        match = False
-        # Проверяем, угадал ли юзер название или артиста (длина слова от 4 букв)
-        if len(msg_clean) >= 3:
-            if title_clean and len(title_clean) >= 3 and title_clean in msg_clean: match = True
-            if artist_clean and len(artist_clean) >= 3 and artist_clean in msg_clean: match = True
+        is_match = False
+        if is_fuzzy_match(message_text, artist) or is_fuzzy_match(message_text, title):
+            is_match = True
 
-        if match:
-            context.chat_data['quiz_active'] = False # Останавливаем игру
+        if is_match:
+            session.quiz_active = False # Останавливаем игру
             
-            # Начисляем очки
             user_id = update.effective_user.id
             winner_name = update.effective_user.first_name
             if 'scores' not in context.chat_data: context.chat_data['scores'] = {}
             context.chat_data['scores'][user_id] = context.chat_data['scores'].get(user_id, 0) + 1
             score = context.chat_data['scores'][user_id]
             
-            # ИИ Хвалит победителя
-            prompt = f"В нашей викторине пользователь {winner_name} только что первым угадал песню! Это был трек: {context.chat_data['quiz_full']}. Похвали его очень круто в своем стиле и скажи, что у него теперь {score} очков!"
+            prompt = f"В нашей викторине пользователь {winner_name} только что первым угадал песню! Это был трек: {session.quiz_full}. Похвали его очень круто в своем стиле и скажи, что у него теперь {score} очков!"
             announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
             await context.bot.send_message(chat_id, f"🎉 🎙 {announcement}")
-            return # Выходим, чтобы ИИ не искал этот трек как радио
+            return
 
     if "open.spotify.com/track" in message_text:
         match = re.search(r'(https?://open\.spotify\.com/track/[a-zA-Z0-9]+)', message_text)
@@ -207,92 +226,21 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
     elif intent == 'chat': await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
 
-# 🎮 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ"
+# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ" (Связь с Радио)
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if context.chat_data.get('quiz_active'):
-        await context.bot.send_message(chat_id, "❌ Игра уже идет! Слушайте голосовое сообщение и пишите варианты в чат.")
-        return
-
-    msg = await context.bot.send_message(chat_id, "🎲 <i>Настраиваю аппаратуру для викторины...</i>", parse_mode=ParseMode.HTML)
-
-    queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "queen", "nirvana", "t.a.t.u.", "моргенштерн", "сектор газа", "zivert", "скриптонит"]
-    downloader = context.application.downloader
-    tracks = await downloader.search(random.choice(queries), limit=5)
-
-    if not tracks:
-        await msg.edit_text("❌ Не удалось найти трек для викторины. Попробуйте еще раз.")
-        return
-
-    track = random.choice(tracks[:3])
-    dl_res = await downloader.download(track.identifier, track)
-
-    if not dl_res.success or not dl_res.file_path:
-        await msg.edit_text("❌ Ошибка загрузки секретного трека.")
-        return
-
-    info = dl_res.track_info
-    input_file = str(dl_res.file_path)
+    session = context.application.radio_manager._sessions.get(chat_id)
     
-    # Жесткий локальный путь для сохранения фрагмента
-    settings = context.application.settings
-    output_file = str(settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
-    
-    start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
+    if not session:
+        await update.message.reply_text("❌ Сначала запустите радио (/radio), чтобы играть в викторину!")
+        return
+        
+    if getattr(session, 'quiz_active', False):
+        await update.message.reply_text("❌ Игра уже идет! Слушайте голосовое сообщение и пишите варианты в чат.")
+        return
 
-    try:
-        # 🔥 САМАЯ БЕЗОПАСНАЯ КОМАНДА FFMPEG ДЛЯ RAILWAY
-        # Никаких сложных кодеков. Просто берем кусок и пакуем в OGG для Телеграма
-        cmd = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', '-c:a', 'copy', output_file]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-
-        # Если copy не сработал (редко бывает из-за кривого исходника), режем самым базовым mp3 кодеком
-        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0: 
-            cmd_fallback = ['ffmpeg', '-y', '-i', input_file, '-ss', str(start_time), '-t', '15', output_file]
-            proc2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await proc2.wait()
-            
-            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-                raise Exception("FFmpeg failed to slice audio")
-
-        await msg.delete()
-
-        prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 15 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
-        announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-        if announcement: 
-            await context.bot.send_message(chat_id, f"🎙 {announcement}")
-
-        # Отправляем кружок-голосовуху!
-        with open(output_file, 'rb') as f:
-            await context.bot.send_voice(chat_id, voice=f)
-
-        context.chat_data['quiz_active'] = True
-        context.chat_data['quiz_artist'] = info.artist
-        context.chat_data['quiz_title'] = info.title
-        context.chat_data['quiz_full'] = f"{info.artist} - {info.title}"
-
-    except Exception as e:
-        logger.error(f"Quiz error: {e}")
-        await context.bot.send_message(chat_id, "❌ Сбой аппаратуры при создании викторины. Возможно, трек заблокирован для нарезки.")
-        context.chat_data['quiz_active'] = False
-    finally:
-        # Убираем за собой мусор
-        if os.path.exists(input_file): 
-            try: os.unlink(input_file)
-            except: pass
-        if os.path.exists(output_file): 
-            try: os.unlink(output_file)
-            except: pass
-
-    # Таймер окончания игры
-    if context.chat_data.get('quiz_active'):
-        await asyncio.sleep(30)
-        if context.chat_data.get('quiz_active'):
-            context.chat_data['quiz_active'] = False
-            prompt = f"Время вышло, и никто не угадал песню! Это был трек: {context.chat_data['quiz_full']}. Высмей их музыкальный вкус и медлительность в своем стиле. Жестко, но смешно."
-            roast = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-            await context.bot.send_message(chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
+    session.last_quiz_time = time.time() # Сбрасываем авто-таймер
+    asyncio.create_task(session.run_quiz())
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -378,7 +326,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(CommandHandler("skip", skip_command))
-    app.add_handler(CommandHandler("quiz", quiz_command)) # 🔥 ИГРА АКТИВИРОВАНА
-    app.add_handler(MessageHandler(filters.VOICE, voice_handler)) # 🔥 ГОЛОС АКТИВИРОВАН
+    app.add_handler(CommandHandler("quiz", quiz_command))
+    app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))
