@@ -92,6 +92,7 @@ class RadioSession:
         if self.current_task: self.current_task.cancel()
         self.quiz_active = False
         await self._delete_status()
+        logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
         self.skip_event.set()
@@ -144,8 +145,13 @@ class RadioSession:
             else: self.played_ids.clear()
         self._is_searching = False
 
-    # 🎮 ЛОГИКА АВТОМАТИЧЕСКОЙ ВИКТОРИНЫ
+    # 🎮 ЛОГИКА АВТОМАТИЧЕСКОЙ ВИКТОРИНЫ (Бронебойная)
     async def run_quiz(self):
+        # ⚠️ Инициализируем переменные заранее, чтобы исключить UnboundLocalError
+        dl_res = None
+        input_file = None
+        output_file = None
+        
         try:
             self.quiz_active = True
             await self._update_status("🎲 <i>Настраиваю аппаратуру для викторины...</i>")
@@ -158,7 +164,7 @@ class RadioSession:
                 
             track = random.choice(tracks[:3])
             dl_res = await self.downloader.download(track.identifier, track)
-            if not dl_res.success or not dl_res.file_path:
+            if not dl_res or not dl_res.success or not dl_res.file_path:
                 self.quiz_active = False
                 return
                 
@@ -190,10 +196,8 @@ class RadioSession:
             self.quiz_title = info.title
             self.quiz_full = f"{info.artist} - {info.title}"
             
-            # Ждем 30 секунд ответа от пользователей
             await asyncio.sleep(30)
             
-            # Если статус все еще True, значит никто не угадал
             if self.quiz_active:
                 self.quiz_active = False
                 prompt = f"Время вышло, никто не угадал песню! Это был трек: {self.quiz_full}. Высмей их музыкальный вкус в своем стиле."
@@ -204,31 +208,30 @@ class RadioSession:
             logger.error(f"Quiz run error: {e}")
             self.quiz_active = False
         finally:
-            if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_file): 
+            # ⚠️ Безопасное удаление файлов
+            if dl_res and getattr(dl_res, 'is_url', False) == False and input_file and os.path.exists(input_file): 
                 try: os.unlink(input_file)
                 except: pass
-            if os.path.exists(output_file): 
+            if output_file and os.path.exists(output_file): 
                 try: os.unlink(output_file)
                 except: pass
-
 
     async def _radio_loop(self):
         while self.is_running:
             try:
-                # ⏸ ЕСЛИ ИДЕТ ВИКТОРИНА - РАДИО СТОИТ НА ПАУЗЕ!
                 if self.quiz_active:
                     await asyncio.sleep(2)
                     continue
 
-                # 🎮 АВТО-ВИКТОРИНА РАЗ В 30 МИНУТ
                 if time.time() - self.last_quiz_time > 1800:
                     self.last_quiz_time = time.time()
                     await self.run_quiz()
                     continue
 
                 if time.time() - self.last_genre_change > 3600:
-                    from radio import get_random_catalog_query 
+                    # ⚠️ Убрали само-импорты (вызываем функцию напрямую)
                     from ai_personas import PERSONAS 
+                    
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
@@ -313,6 +316,7 @@ class RadioSession:
 
     async def _send_track(self, track: TrackInfo, result: DownloadResult) -> bool:
         try:
+            # ⚠️ Вызываем напрямую, без само-импортов
             caption = get_now_playing_message(track, self.display_name)
             markup = None
             if self.chat_type != ChatType.CHANNEL:

@@ -153,10 +153,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         intent, query = analysis.get("intent"), analysis.get("query")
         user_name = update.effective_user.first_name
         
-        # Если идет игра, перехватываем голос как ответ на викторину!
+        # 🎮 ЕСЛИ ИДЕТ ВИКТОРИНА - ГОЛОС ИДЕТ СЮДА
         session = context.application.radio_manager._sessions.get(chat_id)
-        if session and session.quiz_active:
-            update.effective_message.text = transcribed_text # Подменяем текст для текстового хендлера
+        if session and getattr(session, 'quiz_active', False):
+            update.effective_message.text = transcribed_text 
             await text_handler(update, context)
             return
 
@@ -178,7 +178,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message_text = message.text
 
-    # 🎮 УМНАЯ ПРОВЕРКА ОТВЕТОВ НА ВИКТОРИНУ С ПРОЩЕНИЕМ ОПЕЧАТОК
+    # 🎮 ПРИОРИТЕТ 1: ЕСЛИ ИДЕТ ВИКТОРИНА - ЭТО ОТВЕТ, А НЕ ЗАПРОС ИИ!
     session = context.application.radio_manager._sessions.get(chat_id)
     if session and getattr(session, 'quiz_active', False):
         artist = session.quiz_artist
@@ -201,7 +201,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
             await context.bot.send_message(chat_id, f"🎉 🎙 {announcement}")
             return
+            
+        # ⚠️ Если идет игра, но ответ неверный - мы ПРОСТО ИГНОРИРУЕМ ТЕКСТ. 
+        # Не отдаем его ИИ, чтобы не включались другие песни!
+        return 
 
+    # --- Стандартная обработка, если игры нет ---
+    
     if "open.spotify.com/track" in message_text:
         match = re.search(r'(https?://open\.spotify\.com/track/[a-zA-Z0-9]+)', message_text)
         if match: await _do_spotify_play(chat_id, match.group(1), context)
