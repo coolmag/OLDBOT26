@@ -1,5 +1,5 @@
 import asyncio
-import logging
+import logging  # ⚠️ ЭТОТ ИМПОРТ ДОЛЖЕН БЫТЬ
 import random
 import os
 import time
@@ -17,9 +17,25 @@ from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
 
+# Загрузка каталога жанров
+with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
+    MUSIC_CATALOG = json.load(f)
+
+# ⚠️ ВОТ ЭТА СТРОКА БЫЛА ПОТЕРЯНА. ОНА КРИТИЧЕСКИ ВАЖНА ДЛЯ ЛОГОВ!
+logger = logging.getLogger(__name__)
+
+def format_duration(seconds: int) -> str:
+    mins, secs = divmod(seconds, 60)
+    return f"{mins}:{secs:02d}"
+
+def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
+    icon = random.choice(["🎧", "🎵", "🎶", "📻", "💿"])
+    safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
+    return f"{icon} *{safe_title[:40].strip()}*\n👤 {safe_artist[:30].strip()}\n⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
+
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
-    with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
-        MUSIC_CATALOG = json.load(f)
     all_queries = []
     def extract(node):
         if isinstance(node, dict):
