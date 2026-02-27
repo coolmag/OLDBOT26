@@ -120,9 +120,10 @@ class YouTubeDownloader:
             'quiet': True, 
             'noprogress': True, 
             'noplaylist': True,
-            'max_filesize': 20000000, 
-            'nopart': True, # ⚠️ ЗАЩИТА ОТ ГЛЮКОВ ФАЙЛОВОЙ СИСТЕМЫ RAILWAY
-            'match_filter': duration_filter, # Включаем фильтр
+            'max_filesize': 20000000, # Максимум 20 МБ
+            'min_filesize': 1000000,  # ⚠️ МИНИМУМ 1 МБ! Отсекаем 30-секундные превью и огрызки
+            'nopart': True, 
+            'match_filter': duration_filter,
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
         }
         try:

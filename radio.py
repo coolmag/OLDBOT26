@@ -73,6 +73,7 @@ class RadioSession:
     _is_searching: bool = field(init=False, default=False)
     
     last_genre_change: float = field(init=False, default_factory=time.time)
+    failed_downloads_count: int = field(init=False, default=0) # ⚠️ СЧЕТЧИК ФЕЙЛОВ
     
     # 🔥 ПАРАМЕТРЫ ДЛЯ ВИКТОРИНЫ
     quiz_active: bool = field(init=False, default=False)
@@ -149,19 +150,23 @@ class RadioSession:
     async def _radio_loop(self):
         while self.is_running:
             try:
-                if self.quiz_active:
+                # ⏸ ЕСЛИ ИДЕТ ВИКТОРИНА - РАДИО СТОИТ НА ПАУЗЕ!
+                if getattr(self, 'quiz_active', False):
                     await asyncio.sleep(2)
                     continue
 
-                if time.time() - self.last_quiz_time > 1800:
-                    self.last_quiz_time = time.time()
-                    await self.run_quiz()
-                    continue
+                # ⚠️ ВНИМАНИЕ: Авто-викторина удалена, чтобы избежать Loop Error!
+                # Викторина запускается ТОЛЬКО через команду /quiz юзером.
 
-                if time.time() - self.last_genre_change > 3600:
-                    # ⚠️ Убрали само-импорты (вызываем функцию напрямую)
-                    from ai_personas import PERSONAS 
+                # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
+                if time.time() - self.last_genre_change > 3600 or self.failed_downloads_count >= 5:
                     
+                    if self.failed_downloads_count >= 5:
+                        logger.warning(f"[{self.chat_id}] ⚠️ 5 неудачных скачиваний подряд. Принудительная смена жанра!")
+                        self.failed_downloads_count = 0 # Сбрасываем счетчик
+                    
+                    from radio import get_random_catalog_query 
+                    from ai_personas import PERSONAS 
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
@@ -183,7 +188,8 @@ class RadioSession:
                     await asyncio.sleep(5)
                     await self._fill_playlist()
                     if not self.playlist:
-                        await asyncio.sleep(10)
+                        self.failed_downloads_count += 1 # Если ничего не нашли, увеличиваем счетчик
+                        await asyncio.sleep(5)
                         continue
 
                 track = self.playlist.pop(0)
@@ -197,13 +203,20 @@ class RadioSession:
                         is_valid_file = True
                     elif result.file_path and Path(result.file_path).exists():
                         file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
-                        if file_size_mb <= 20.0: is_valid_file = True
-                        else: os.unlink(result.file_path)
+                        # ⚠️ Строгая проверка: не меньше 1 МБ, не больше 20 МБ
+                        if 1.0 <= file_size_mb <= 20.0: 
+                            is_valid_file = True
+                        else: 
+                            logger.error(f"[{self.chat_id}] ❌ Трек отклонен из-за размера: {file_size_mb:.2f} MB.")
+                            os.unlink(result.file_path)
 
                 if not is_valid_file:
+                    self.failed_downloads_count += 1 # ⚠️ УВЕЛИЧИВАЕМ СЧЕТЧИК БРАКА
                     await self._delete_status()
                     continue
 
+                # Если скачалось успешно - сбрасываем счетчик брака!
+                self.failed_downloads_count = 0
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
