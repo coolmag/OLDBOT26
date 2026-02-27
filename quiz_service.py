@@ -65,16 +65,14 @@ class QuizManager:
 
     async def start_quiz(self, chat_id: int, bot: Bot, radio_manager):
         if self.is_active(chat_id):
-            await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте голосовое сообщение и пишите варианты в чат.")
+            await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте сообщение и пишите варианты в чат.")
             return
 
-        # 1. ⚠️ СТАВИМ РАДИО НА ЖЕСТКУЮ ПАУЗУ
         radio_session = radio_manager._sessions.get(chat_id)
         if radio_session: radio_session.quiz_active = True
         
         self.sessions[chat_id] = {'active': True, 'event': asyncio.Event()}
-        
-        msg = await bot.send_message(chat_id, "🎲 <i>Настраиваю аппаратуру для викторины...</i>", parse_mode=ParseMode.HTML)
+        msg = await bot.send_message(chat_id, "🎲 <i>Настраиваю видео-камеры для викторины...</i>", parse_mode=ParseMode.HTML)
 
         queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "zivert", "скриптонит", "t.a.t.u.", "моргенштерн"]
         tracks = await self.downloader.search(random.choice(queries), limit=5)
@@ -93,34 +91,61 @@ class QuizManager:
             return
 
         info = dl_res.track_info
-        input_file = str(dl_res.file_path)
-        output_file = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
+        input_audio = str(dl_res.file_path)
+        
+        # ⚠️ ПУТЬ К ТВОЕМУ ВИДЕО-АВАТАРУ
+        input_video = str(self.settings.BASE_DIR / "avatar.mp4")
+        
+        output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.mp4")
         start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
 
         try:
-            cmd = [
-                'ffmpeg', '-y', '-i', input_file, 
-                '-ss', str(start_time), '-t', '15', 
-                '-c:a', 'libopus', '-b:a', '32k', 
-                '-ac', '1', '-ar', '48000', 
-                '-vbr', 'on', '-compression_level', '10', 
-                output_file
-            ]
+            # 🔥 КИНЕМАТОГРАФИЧЕСКАЯ СКЛЕЙКА (FFMPEG)
+            # Если видео-аватара нет, делаем обычную голосовуху. Если есть - делаем ВИДЕО-КРУЖОК!
+            if os.path.exists(input_video):
+                # Берем видео (-stream_loop 1 зацикливает короткое видео), накладываем на него звук, обрезаем ровно до 15 секунд
+                cmd = [
+                    'ffmpeg', '-y', 
+                    '-stream_loop', '-1', '-i', input_video,  # Бесконечный луп видео
+                    '-ss', str(start_time), '-i', input_audio, # Звук с нужной секунды
+                    '-t', '15', # Длина ровно 15 сек
+                    '-map', '0:v:0', '-map', '1:a:0', # Склеиваем видео с первой дорожки и звук со второй
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', # Быстрое кодирование H.264
+                    '-vf', 'scale=480:480,crop=480:480', # Жесткий квадрат 480x480 для кружочка
+                    '-c:a', 'aac', '-b:a', '128k', # Аудио в AAC (стандарт ТГ)
+                    '-shortest', # Обрезать по самому короткому потоку
+                    output_video
+                ]
+            else:
+                logger.warning("avatar.mp4 не найден! Падаю на обычную голосовуху.")
+                output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
+                cmd = [
+                    'ffmpeg', '-y', '-i', input_audio, 
+                    '-ss', str(start_time), '-t', '15', 
+                    '-c:a', 'libopus', '-b:a', '32k', 
+                    '-ac', '1', '-ar', '48000', 
+                    output_video
+                ]
+
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
 
-            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-                raise Exception("FFmpeg failed")
+            if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
+                raise Exception("FFmpeg failed to create media")
 
             await msg.delete()
 
-            prompt = "Ты ведешь игру 'Угадай мелодию'. Энергично скажи: 'Слушаем 15 секунд! Кто первый назовет трек или артиста — заберет очки. Время пошло!'"
+            prompt = "Ты ведешь игру 'Угадай мелодию'. Энергично скажи: 'Смотрим в эфир! 15 секунд музыки. Кто первый назовет трек или артиста — заберет очки!'"
             announcement = await self.chat_manager.get_response(chat_id, prompt, "System")
             if announcement: 
                 await bot.send_message(chat_id, f"🎙 {announcement}")
 
-            with open(output_file, 'rb') as f:
-                await bot.send_voice(chat_id, voice=f.read(), filename="quiz.ogg")
+            # ⚠️ ОТПРАВКА: Если сделали MP4 - шлем как Video Note (кружок), иначе Voice
+            with open(output_video, 'rb') as f:
+                if output_video.endswith('.mp4'):
+                    await bot.send_video_note(chat_id, video_note=f, length=480)
+                else:
+                    await bot.send_voice(chat_id, voice=f.read(), filename="quiz.ogg")
 
             self.sessions[chat_id].update({
                 'artist': info.artist,
@@ -128,26 +153,25 @@ class QuizManager:
                 'full': f"{info.artist} - {info.title}"
             })
 
-            # Ждем ответа 30 секунд
             try:
                 await asyncio.wait_for(self.sessions[chat_id]['event'].wait(), timeout=30.0)
             except asyncio.TimeoutError:
                 if self.is_active(chat_id):
                     self.sessions[chat_id]['active'] = False
-                    prompt = f"Время вышло, никто не угадал! Это был трек: {info.artist} - {info.title}. Высмей их музыкальный вкус."
+                    prompt = f"Время вышло, никто не угадал! Это был трек: {info.artist} - {info.title}. Высмей их."
                     roast = await self.chat_manager.get_response(chat_id, prompt, "System")
                     await bot.send_message(chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
 
         except Exception as e:
             logger.error(f"Quiz run error: {e}")
-            await bot.send_message(chat_id, "❌ Сбой аппаратуры.")
+            await bot.send_message(chat_id, "❌ Сбой аппаратуры. Проверьте логи.")
         finally:
             self._cleanup(chat_id, radio_session)
-            if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_file): 
-                try: os.unlink(input_file)
+            if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_audio): 
+                try: os.unlink(input_audio)
                 except: pass
-            if os.path.exists(output_file): 
-                try: os.unlink(output_file)
+            if os.path.exists(output_video): 
+                try: os.unlink(output_video)
                 except: pass
 
     def _cleanup(self, chat_id, radio_session):

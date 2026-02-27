@@ -4,8 +4,10 @@ FROM python:3.11-slim
 # Рабочая директория
 WORKDIR /app
 
-# Устанавливаем системные пакеты (ffmpeg критически важен для викторины)
-RUN apt-get update && apt-get install -y ffmpeg libopus-dev && rm -rf /var/lib/apt/lists/*
+# ⚠️ Добавили кодеки для видео-кружочков
+RUN apt-get update && \
+    apt-get install -y ffmpeg libopus-dev libx264-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Копируем зависимости
 COPY requirements.txt .
