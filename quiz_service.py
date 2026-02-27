@@ -10,6 +10,7 @@ from telegram.constants import ParseMode
 
 logger = logging.getLogger("quiz_service")
 
+# 🔥 ПЛАН Б: Резервный локальный алгоритм на случай смерти ИИ-судьи
 def is_fuzzy_match(user_input: str, target: str) -> bool:
     if not user_input or not target: return False
     u = user_input.lower().strip()
@@ -18,26 +19,23 @@ def is_fuzzy_match(user_input: str, target: str) -> bool:
     t_clean = re.sub(r'\(.*?\)|\[.*?\]', '', t).strip()
     if not t_clean: t_clean = t
     
-    # Прямое вхождение строки целиком
     if u in t_clean or t_clean in u: return True
     
     words = t_clean.split()
     for w in words:
         w_c = ''.join(c for c in w if c.isalnum())
         if len(w_c) >= 3:
-            # Вхождение отдельного слова (например, "асти" в "anna asti")
             if u in w_c or w_c in u: return True
-            # Опечатки (например "моргин" вместо "морген")
             if SequenceMatcher(None, u, w_c).ratio() > 0.75: return True
-            
     return False
+
 
 class QuizManager:
     def __init__(self, settings, downloader, chat_manager):
         self.settings = settings
         self.downloader = downloader
         self.chat_manager = chat_manager
-        self.sessions = {} # Хранилище статусов игр по чатам
+        self.sessions = {} 
         self.scores = {}
 
     def is_active(self, chat_id: int) -> bool:
@@ -47,25 +45,52 @@ class QuizManager:
         session = self.sessions.get(chat_id)
         if not session or not session['active']: return False
         
-        # Проверяем ответ
-        is_match = is_fuzzy_match(text, session['artist']) or is_fuzzy_match(text, session['title'])
+        is_match = False
         
+        # 🛡️ ПЛАН А: Умный ИИ-Судья (Gemini Flash)
+        try:
+            prompt = f"""
+            Сейчас идет викторина "Угадай мелодию". Правильный ответ: {session['full']}.
+            Пользователь написал: "{text}"
+            Твоя задача — строго решить, угадал ли он. 
+            Если ответ ПРАВИЛЬНЫЙ (даже с опечатками или на другом языке, "Мияги"="Miyagi"), напиши ровно одно слово: ДА.
+            Если ответ НЕВЕРНЫЙ, напиши ровно одно слово: НЕТ.
+            """
+            # Добавили таймаут на случай, если Google "завис"
+            ai_verdict = await asyncio.wait_for(
+                self.chat_manager.ai_manager.gemini_client.models.generate_content_async(
+                    model="gemini-2.5-flash", 
+                    contents=prompt
+                ),
+                timeout=5.0
+            )
+            verdict_text = ai_verdict.text.strip().upper()
+            if "ДА" in verdict_text:
+                is_match = True
+                
+        except Exception as e:
+            # 🛡️ ПЛАН Б: ИИ упал (лимиты/ошибка). Включаем резервный локальный алгоритм!
+            logger.warning(f"⚠️ ИИ-Судья недоступен ({e}). Переход на локальный Fuzzy Match.")
+            if is_fuzzy_match(text, session['artist']) or is_fuzzy_match(text, session['title']):
+                is_match = True
+
+        # Если юзер угадал (неважно каким способом)
         if is_match:
             session['active'] = False
-            session['event'].set() # Мгновенно останавливаем 30-секундный таймер
+            session['event'].set() 
             
             self.scores[user_id] = self.scores.get(user_id, 0) + 1
             
-            prompt = f"В викторине юзер {user_name} первым угадал песню! Это: {session['full']}. Похвали его очень круто в своем стиле и скажи, что у него теперь {self.scores[user_id]} очков!"
-            announcement = await self.chat_manager.get_response(chat_id, prompt, "System")
+            praise_prompt = f"В викторине юзер {user_name} только что первым угадал песню ({text})! Это был трек: {session['full']}. Похвали его очень круто в своем стиле и скажи, что у него теперь {self.scores[user_id]} очков!"
+            announcement = await self.chat_manager.get_response(chat_id, praise_prompt, "System")
             await bot.send_message(chat_id, f"🎉 🎙 {announcement}")
             return True
             
-        return False # Ответ неверный
+        return False 
 
     async def start_quiz(self, chat_id: int, bot: Bot, radio_manager):
         if self.is_active(chat_id):
-            await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте сообщение и пишите варианты в чат.")
+            await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте видео-сообщение и пишите варианты в чат.")
             return
 
         radio_session = radio_manager._sessions.get(chat_id)
@@ -92,60 +117,44 @@ class QuizManager:
 
         info = dl_res.track_info
         input_audio = str(dl_res.file_path)
-        
-        # ⚠️ ПУТЬ К ТВОЕМУ ВИДЕО-АВАТАРУ
         input_video = str(self.settings.BASE_DIR / "avatar.mp4")
-        
         output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.mp4")
         start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
 
         try:
-            # 🔥 КИНЕМАТОГРАФИЧЕСКАЯ СКЛЕЙКА (FFMPEG)
-            # Если видео-аватара нет, делаем обычную голосовуху. Если есть - делаем ВИДЕО-КРУЖОК!
             if os.path.exists(input_video):
-                # Берем видео (-stream_loop 1 зацикливает короткое видео), накладываем на него звук, обрезаем ровно до 15 секунд
                 cmd = [
                     'ffmpeg', '-y', 
-                    '-stream_loop', '-1', '-i', input_video,  # Бесконечный луп видео
-                    '-ss', str(start_time), '-i', input_audio, # Звук с нужной секунды
-                    '-t', '15', # Длина ровно 15 сек
-                    '-map', '0:v:0', '-map', '1:a:0', # Склеиваем видео с первой дорожки и звук со второй
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', # Быстрое кодирование H.264
-                    '-vf', 'scale=480:480,crop=480:480', # Жесткий квадрат 480x480 для кружочка
-                    '-c:a', 'aac', '-b:a', '128k', # Аудио в AAC (стандарт ТГ)
-                    '-shortest', # Обрезать по самому короткому потоку
+                    '-stream_loop', '-1', '-i', input_video, 
+                    '-ss', str(start_time), '-i', input_audio, 
+                    '-t', '15', 
+                    '-map', '0:v:0', '-map', '1:a:0', 
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', 
+                    '-vf', 'scale=480:480,crop=480:480', 
+                    '-c:a', 'aac', '-b:a', '128k', 
+                    '-shortest', 
                     output_video
                 ]
             else:
-                logger.warning("avatar.mp4 не найден! Падаю на обычную голосовуху.")
                 output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
-                cmd = [
-                    'ffmpeg', '-y', '-i', input_audio, 
-                    '-ss', str(start_time), '-t', '15', 
-                    '-c:a', 'libopus', '-b:a', '32k', 
-                    '-ac', '1', '-ar', '48000', 
-                    output_video
-                ]
+                cmd = ['ffmpeg', '-y', '-i', input_audio, '-ss', str(start_time), '-t', '15', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', '-ar', '48000', output_video]
 
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
 
             if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
-                raise Exception("FFmpeg failed to create media")
+                raise Exception("FFmpeg failed")
 
             await msg.delete()
 
-            prompt = "Ты ведешь игру 'Угадай мелодию'. Энергично скажи: 'Смотрим в эфир! 15 секунд музыки. Кто первый назовет трек или артиста — заберет очки!'"
+            prompt = "Ты ведешь игру 'Угадай мелодию'. Энергично скажи: 'Смотрим в эфир! 15 секунд музыки. Кто первый назовет трек или артиста — заберет очки! Время пошло!'"
             announcement = await self.chat_manager.get_response(chat_id, prompt, "System")
             if announcement: 
                 await bot.send_message(chat_id, f"🎙 {announcement}")
 
-            # ⚠️ ОТПРАВКА: Если сделали MP4 - шлем как Video Note (кружок), иначе Voice
             with open(output_video, 'rb') as f:
-                if output_video.endswith('.mp4'):
-                    await bot.send_video_note(chat_id, video_note=f, length=480)
-                else:
-                    await bot.send_voice(chat_id, voice=f.read(), filename="quiz.ogg")
+                if output_video.endswith('.mp4'): await bot.send_video_note(chat_id, video_note=f, length=480)
+                else: await bot.send_voice(chat_id, voice=f.read(), filename="quiz.ogg")
 
             self.sessions[chat_id].update({
                 'artist': info.artist,
@@ -164,7 +173,7 @@ class QuizManager:
 
         except Exception as e:
             logger.error(f"Quiz run error: {e}")
-            await bot.send_message(chat_id, "❌ Сбой аппаратуры. Проверьте логи.")
+            await bot.send_message(chat_id, "❌ Сбой аппаратуры.")
         finally:
             self._cleanup(chat_id, radio_session)
             if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_audio): 
@@ -175,7 +184,6 @@ class QuizManager:
                 except: pass
 
     def _cleanup(self, chat_id, radio_session):
-        # ⚠️ ОБЯЗАТЕЛЬНАЯ СЕКЦИЯ: СНИМАЕМ ИГРУ И РАДИО С ПАУЗЫ ПРИ ЛЮБОМ ИСХОДЕ
         if chat_id in self.sessions:
             self.sessions[chat_id]['active'] = False
         if radio_session:
