@@ -107,11 +107,14 @@ class YouTubeDownloader:
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_sc_temp")
         
-        # ⚠️ ФИЛЬТР: Отсекаем диджей-сеты и миксы длиннее 12 минут еще ДО скачивания
+        # ⚠️ УМНЫЙ ФИЛЬТР: Отсекаем диджей-сеты (>12 мин) и превьюшки (<1 мин)
         def duration_filter(info, *, incomplete):
             duration = info.get('duration')
-            if duration and duration > 720:
-                return 'Трек слишком длинный (Микс)'
+            if duration:
+                if duration > 720:
+                    return 'Трек слишком длинный (Микс)'
+                if duration < 60:
+                    return 'Трек слишком короткий (Превью)'
             return None
 
         opts = {
@@ -120,10 +123,10 @@ class YouTubeDownloader:
             'quiet': True, 
             'noprogress': True, 
             'noplaylist': True,
-            'max_filesize': 20000000, # Максимум 20 МБ
-            'min_filesize': 1000000,  # ⚠️ МИНИМУМ 1 МБ! Отсекаем 30-секундные превью и огрызки
+            'max_filesize': 20000000, 
+            # ⚠️ УДАЛЕН ГЛЮЧНЫЙ min_filesize
             'nopart': True, 
-            'match_filter': duration_filter,
+            'match_filter': duration_filter, # Работаем только через длительность!
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
         }
         try:
