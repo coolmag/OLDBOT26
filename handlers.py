@@ -1,12 +1,7 @@
 from __future__ import annotations
 import logging
-import asyncio
-import json
 import random
 import re
-import os
-import time # ⚠️ ВОТ ЭТОТ ИМПОРТ МЫ ДОБАВИЛИ ДЛЯ ВИКТОРИНЫ
-from difflib import SequenceMatcher # ⚠️ ДЛЯ ПРОЩЕНИЯ ОПЕЧАТОК!
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
@@ -14,6 +9,7 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
     MessageHandler, filters
 )
+
 from ai_personas import PERSONAS
 
 logger = logging.getLogger("handlers")
@@ -31,54 +27,6 @@ GREETINGS = {
     "news": ["В эфире экстренный выпуск новостей музыки. 📰", "Сводка новостей: вы подключились. 📡"]
 }
 
-# 🔥 АЛГОРИТМ "ПРОЩЕНИЯ ОПЕЧАТОК" (Super Fuzzy Matching)
-def is_fuzzy_match(user_input: str, target: str) -> bool:
-    if not user_input or not target: return False
-    user_input = user_input.lower().strip()
-    target = target.lower()
-    
-    # Убираем все скобки (Remix, feat) из оригинала
-    target_clean = re.sub(r'\(.*?\)|\[.*?\]', '', target)
-    words = target_clean.split()
-    
-    # Если юзер ввел ровно то же самое (или одно из слов артиста/трека)
-    for w in words:
-        w_clean = ''.join(c for c in w if c.isalnum())
-        if not w_clean or len(w_clean) < 3: continue
-        
-        # Юзер ввел "Асти", а артист "Anna Asti" - Зачет!
-        if user_input in w_clean or w_clean in user_input: return True
-        
-        # Если юзер ошибся в одной-двух буквах ("Лабода" вместо "Loboda")
-        if SequenceMatcher(None, user_input, w_clean).ratio() >= 0.70:
-            return True
-            
-    # Проверка целиком (на всякий случай)
-    target_full = ''.join(c for c in target_clean if c.isalnum())
-    user_full = ''.join(c for c in user_input if c.isalnum())
-    if user_full in target_full or SequenceMatcher(None, user_full, target_full).ratio() >= 0.75:
-        return True
-        
-    return False
-
-# --- Internal Action Functions ---
-
-async def _do_spotify_play(chat_id: int, spotify_url: str, context: ContextTypes.DEFAULT_TYPE):
-    msg = await context.bot.send_message(chat_id, "🎶 Ищу трек в Spotify...", disable_notification=True)
-    spotify_service = context.application.spotify_service
-    dl_res = await spotify_service.download_from_url(spotify_url)
-    await msg.delete()
-
-    if dl_res.success and dl_res.file_path:
-        try:
-            info = dl_res.track_info
-            with open(dl_res.file_path, 'rb') as f:
-                await context.bot.send_audio(chat_id=chat_id, audio=f, title=info.title, performer=info.artist)
-        except Exception:
-            await context.bot.send_message(chat_id, "❌ Ошибка при отправке файла.")
-    else:
-        await context.bot.send_message(chat_id, "😕 Не удалось скачать трек из Spotify.")
-
 async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, dedication: str = None):
     msg = await context.bot.send_message(chat_id, f"🔎 Ищу: *{query[:100]}*...", parse_mode=ParseMode.MARKDOWN, disable_notification=True)
     downloader = context.application.downloader
@@ -91,7 +39,6 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
                 await msg.delete()
                 try:
                     info = dl_res.track_info
-                    
                     if dedication:
                         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
                         prompt = f"Ты в прямом эфире радио! Пользователь заказал трек '{info.artist} - {info.title}' и оставил послание: '{dedication}'. Сделай крутую подводку к треку и передай это послание от себя в своем уникальном стиле! Будь кратким."
@@ -119,7 +66,7 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
                     logger.error(f"Error sending audio: {e}", exc_info=True)
                     await context.bot.send_message(chat_id, "❌ Ошибка при отправке файла.")
                     return
-        await msg.edit_text("😕 Не удалось скачать трек: Все найденные варианты заблокированы.")
+        await msg.edit_text("😕 Не удалось скачать трек.")
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
@@ -127,6 +74,7 @@ async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE
     effective_query = query or "случайные популярные треки"
     await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{effective_query}*", parse_mode=ParseMode.MARKDOWN)
     radio_manager = context.application.radio_manager
+    import asyncio
     asyncio.create_task(radio_manager.start(chat_id, effective_query))
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE):
@@ -134,8 +82,6 @@ async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: Conte
     chat_manager = context.application.chat_manager
     response = await chat_manager.get_response(chat_id, text, user_name)
     if response: await context.bot.send_message(chat_id, response)
-
-# --- Handlers ---
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -152,29 +98,13 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await msg.edit_text(f"🗣 <b>Вы сказали:</b> {transcribed_text}", parse_mode=ParseMode.HTML)
-
-        analysis = await ai_manager.analyze_message(transcribed_text)
-        intent, query = analysis.get("intent"), analysis.get("query")
-        user_name = update.effective_user.first_name
         
-        # 🎮 ЕСЛИ ИДЕТ ВИКТОРИНА - ГОЛОС ИДЕТ СЮДА
-        session = context.application.radio_manager._sessions.get(chat_id)
-        if session and getattr(session, 'quiz_active', False):
-            update.effective_message.text = transcribed_text 
-            await text_handler(update, context)
-            return
-
-        if intent == 'search' and query:
-            if "|" in query:
-                q, d = query.split("|", 1)
-                await _do_play(chat_id, q.strip(), context, dedication=d.strip())
-            else: await _do_play(chat_id, query, context)
-        elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
-        elif intent == 'chat': await _do_chat_reply(chat_id, transcribed_text, user_name, context)
+        update.effective_message.text = transcribed_text 
+        await text_handler(update, context)
 
     except Exception as e:
-        logger.error(f"Voice error: {e}", exc_info=True)
-        await msg.edit_text("❌ Ошибка распознавания голоса. Попробуйте еще раз.")
+        logger.error(f"Voice error: {e}")
+        await msg.edit_text("❌ Ошибка распознавания голоса.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
@@ -182,42 +112,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message_text = message.text
 
-    # 🎮 АБСОЛЮТНАЯ ИЗОЛЯЦИЯ ВИКТОРИНЫ
-    session = context.application.radio_manager._sessions.get(chat_id)
-    if session and getattr(session, 'quiz_active', False):
-        artist = session.quiz_artist
-        title = session.quiz_title
-
-        # Если сообщение начинается со слеша (команда), пропускаем его
-        if message_text.startswith('/'):
-            pass 
-        else:
-            is_match = False
-            if is_fuzzy_match(message_text, artist) or is_fuzzy_match(message_text, title):
-                is_match = True
-
-            if is_match:
-                session.quiz_active = False # Останавливаем игру
-                
-                user_id = update.effective_user.id
-                winner_name = update.effective_user.first_name
-                if 'scores' not in context.chat_data: context.chat_data['scores'] = {}
-                context.chat_data['scores'][user_id] = context.chat_data['scores'].get(user_id, 0) + 1
-                score = context.chat_data['scores'][user_id]
-                
-                prompt = f"В нашей викторине пользователь {winner_name} только что первым угадал песню! Это был трек: {session.quiz_full}. Похвали его очень круто в своем стиле и скажи, что у него теперь {score} очков!"
-                announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-                await context.bot.send_message(chat_id, f"🎉 🎙 {announcement}")
-            
-            # ⚠️ ЩИТ: Игра идет, но ответ неверный? Мы просто убиваем сообщение. 
-            # Оно не пойдет в ИИ и не будет качать случайные треки!
-            return
-
-    if "open.spotify.com/track" in message_text:
-        match = re.search(r'(https?://open\.spotify\.com/track/[a-zA-Z0-9]+)', message_text)
-        if match: await _do_spotify_play(chat_id, match.group(1), context)
+    # 🎮 АБСОЛЮТНАЯ ИЗОЛЯЦИЯ ВИКТОРИНЫ (Через новый сервис!)
+    quiz_manager = context.application.quiz_manager
+    if quiz_manager.is_active(chat_id):
+        if message_text.startswith('/'): return
+        
+        # Передаем текст в сервис викторины
+        is_correct = await quiz_manager.process_answer(chat_id, update.effective_user.id, update.effective_user.first_name, message_text, context.bot)
+        
+        # 🔥 ФИЧА: Если юзер не угадал - кидаем дизлайк (реакцию)!
+        if not is_correct:
+            try: await message.set_reaction(reaction="👎")
+            except: pass
+        
+        # ⚠️ ЩИТ: Мы внутри викторины. Дальше текст не пускаем.
         return
 
+    # --- Стандартная обработка ---
     is_private = update.effective_chat.type == ChatType.PRIVATE
     is_reply = message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
     is_mention = any(m in message_text.lower() for m in ["аврора", "aurora", "бот", "dj"])
@@ -238,99 +149,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
     elif intent == 'chat': await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
 
-# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ" (Исправлено для мобилок)
+# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ"
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    session = context.application.radio_manager._sessions.get(chat_id)
-    
-    if not session:
-        await update.message.reply_text("❌ Сначала запустите радио (/radio), чтобы играть в викторину!")
-        return
-        
-    if getattr(session, 'quiz_active', False):
-        await update.message.reply_text("❌ Игра уже идет! Слушайте голосовое сообщение и пишите варианты в чат.")
-        return
-
-    session.last_quiz_time = time.time() # Сбрасываем авто-таймер
-    msg = await context.bot.send_message(chat_id, "🎲 <i>Настраиваю аппаратуру для викторины...</i>", parse_mode=ParseMode.HTML)
-
-    queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "queen", "nirvana", "t.a.t.u.", "моргенштерн", "сектор газа", "zivert", "скриптонит"]
-    downloader = context.application.downloader
-    tracks = await downloader.search(random.choice(queries), limit=5)
-
-    if not tracks:
-        await msg.edit_text("❌ Не удалось найти трек для викторины. Попробуйте еще раз.")
-        return
-
-    track = random.choice(tracks[:3])
-    dl_res = await downloader.download(track.identifier, track)
-
-    if not dl_res.success or not dl_res.file_path:
-        await msg.edit_text("❌ Ошибка загрузки секретного трека.")
-        return
-
-    info = dl_res.track_info
-    input_file = str(dl_res.file_path)
-    
-    settings = context.application.settings
-    output_file = str(settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
-    
-    start_time = max(0, (info.duration // 2) - 10) if info.duration else 30
-
-    try:
-        # ⚠️ ЖЕСТКИЙ СТАНДАРТ TELEGRAM VOICE ДЛЯ СМАРТФОНОВ
-        # -ac 1 (Моно звук), -ar 48000 (Частота 48kHz), -c:a libopus (кодек Opus)
-        cmd = [
-            'ffmpeg', '-y', '-i', input_file, 
-            '-ss', str(start_time), '-t', '15', 
-            '-c:a', 'libopus', '-b:a', '32k', 
-            '-ac', '1', '-ar', '48000', 
-            output_file
-        ]
-        
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-
-        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-            raise Exception("FFmpeg failed to create valid Opus file")
-
-        await msg.delete()
-
-        prompt = "Ты ведешь игру 'Угадай мелодию'. Коротко и очень энергично скажи: 'Слушаем 15 секунд! Кто первый напишет название трека или артиста в чат — тот заберет очки. Время пошло!'"
-        announcement = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-        if announcement: 
-            await context.bot.send_message(chat_id, f"🎙 {announcement}")
-
-        # Отправляем 100% совместимую голосовуху
-        with open(output_file, 'rb') as f:
-            await context.bot.send_voice(chat_id, voice=f)
-
-        context.chat_data['quiz_active'] = True
-        context.chat_data['quiz_artist'] = info.artist
-        context.chat_data['quiz_title'] = info.title
-        context.chat_data['quiz_full'] = f"{info.artist} - {info.title}"
-
-    except Exception as e:
-        logger.error(f"Quiz error: {e}")
-        await context.bot.send_message(chat_id, "❌ Сбой аппаратуры при создании викторины.")
-        context.chat_data['quiz_active'] = False
-    finally:
-        if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_file): 
-            try: os.unlink(input_file)
-            except: pass
-        if os.path.exists(output_file): 
-            try: os.unlink(output_file)
-            except: pass
-
-    # Таймер окончания игры
-    if context.chat_data.get('quiz_active'):
-        await asyncio.sleep(30)
-        if context.chat_data.get('quiz_active'):
-            context.chat_data['quiz_active'] = False
-            prompt = f"Время вышло, и никто не угадал песню! Это был трек: {context.chat_data['quiz_full']}. Высмей их музыкальный вкус и медлительность в своем стиле. Жестко, но смешно."
-            roast = await context.application.chat_manager.get_response(chat_id, prompt, "System")
-            await context.bot.send_message(chat_id, f"⏰ 🎙 {roast}", parse_mode=ParseMode.MARKDOWN)
-
+    quiz_mgr = context.application.quiz_manager
+    radio_mgr = context.application.radio_manager
+    import asyncio
+    asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot, radio_mgr))
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎧 Aurora AI DJ. Включаю радио или ищу треки. С чего начнем?")
@@ -365,7 +189,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
 
     if not is_admin:
-        await update.message.reply_text(f"⛔️ Вы не админ.\nВаш ID: `{user_id}`\nВставьте его в ADMIN_IDS в Railway.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"⛔️ Вы не админ.\nВаш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
         return
 
     current_mode = context.application.chat_manager.get_mode(update.effective_chat.id)
@@ -387,13 +211,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "skip_track":
         await context.application.radio_manager.skip(update.effective_chat.id)
-        try:
-            player_url = getattr(settings, 'PLAYER_URL', '') or getattr(settings, 'BASE_URL', '') or getattr(settings, 'WEBHOOK_URL', '').replace('/telegram', '')
-            if player_url:
-                if not player_url.startswith('http'): player_url = f"https://{player_url}"
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Плеер", url=player_url)]]))
-            else: await query.edit_message_reply_markup(reply_markup=None)
-        except Exception: pass
         return
 
     if query.data.startswith("set_mode|"):

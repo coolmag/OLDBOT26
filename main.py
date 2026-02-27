@@ -16,6 +16,7 @@ from config import get_settings
 from logging_setup import setup_logging
 from ai_manager import AIManager
 from youtube import YouTubeDownloader
+from quiz_service import QuizManager
 from radio import RadioManager
 from chat_service import ChatManager
 from cache_service import CacheService
@@ -80,6 +81,11 @@ async def lifespan(app: FastAPI):
     tg_app = builder.build()
     
     radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
+    
+    # ⚠️ ДОБАВЛЯЕМ СЮДА
+    quiz_manager = QuizManager(settings, downloader, chat_manager)
+    tg_app.quiz_manager = quiz_manager
+    app.state.quiz_manager = quiz_manager
     
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
