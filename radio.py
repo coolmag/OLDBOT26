@@ -155,15 +155,26 @@ class RadioSession:
                     await asyncio.sleep(2)
                     continue
 
-                # ⚠️ ВНИМАНИЕ: Авто-викторина удалена, чтобы избежать Loop Error!
-                # Викторина запускается ТОЛЬКО через команду /quiz юзером.
+                # 🎮 АВТО-ВИКТОРИНА РАЗ В 15 МИНУТ (900 секунд)
+                if time.time() - self.last_quiz_time > 900:
+                    self.last_quiz_time = time.time()
+                    
+                    # Запрашиваем QuizManager из Telegram Application (переданного в боте)
+                    # Чтобы не делать круговых импортов, берем его из контекста
+                    quiz_mgr = getattr(self.bot, 'quiz_manager', None)
+                    if quiz_mgr:
+                        logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
+                        # Мы НЕ ждем конца викторины здесь, мы просто запускаем её как фоновую задачу
+                        asyncio.create_task(quiz_mgr.start_quiz(self.chat_id, self.bot, self.bot.radio_manager))
+                        # Мгновенно уходим на следующий виток цикла (он встанет на паузу из-за quiz_active=True)
+                        continue
 
                 # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
                 if time.time() - self.last_genre_change > 3600 or self.failed_downloads_count >= 5:
                     
                     if self.failed_downloads_count >= 5:
                         logger.warning(f"[{self.chat_id}] ⚠️ 5 неудачных скачиваний подряд. Принудительная смена жанра!")
-                        self.failed_downloads_count = 0 # Сбрасываем счетчик
+                        self.failed_downloads_count = 0 
                     
                     from radio import get_random_catalog_query 
                     from ai_personas import PERSONAS 
@@ -188,7 +199,7 @@ class RadioSession:
                     await asyncio.sleep(5)
                     await self._fill_playlist()
                     if not self.playlist:
-                        self.failed_downloads_count += 1 # Если ничего не нашли, увеличиваем счетчик
+                        self.failed_downloads_count += 1
                         await asyncio.sleep(5)
                         continue
 
@@ -203,7 +214,6 @@ class RadioSession:
                         is_valid_file = True
                     elif result.file_path and Path(result.file_path).exists():
                         file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
-                        # ⚠️ Строгая проверка: не меньше 1 МБ, не больше 20 МБ
                         if 1.0 <= file_size_mb <= 20.0: 
                             is_valid_file = True
                         else: 
@@ -211,11 +221,10 @@ class RadioSession:
                             os.unlink(result.file_path)
 
                 if not is_valid_file:
-                    self.failed_downloads_count += 1 # ⚠️ УВЕЛИЧИВАЕМ СЧЕТЧИК БРАКА
+                    self.failed_downloads_count += 1
                     await self._delete_status()
                     continue
 
-                # Если скачалось успешно - сбрасываем счетчик брака!
                 self.failed_downloads_count = 0
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
@@ -254,7 +263,7 @@ class RadioSession:
                 
                 self.skip_event.clear()
             except asyncio.CancelledError: break
-            except Exception as e: logger.error(f"Loop error: {e}"); await asyncio.sleep(5)
+            except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await asyncio.sleep(5)
         self.is_running = False
 
     async def _send_track(self, track: TrackInfo, result: DownloadResult) -> bool:

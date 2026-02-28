@@ -81,12 +81,13 @@ async def lifespan(app: FastAPI):
     tg_app = builder.build()
     
     radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
-    
-    # ⚠️ ДОБАВЛЯЕМ СЮДА
     quiz_manager = QuizManager(settings, downloader, chat_manager)
-    tg_app.quiz_manager = quiz_manager
-    app.state.quiz_manager = quiz_manager
     
+    # Привязываем менеджеры к боту и приложению для взаимного доступа
+    tg_app.bot.quiz_manager = quiz_manager 
+    tg_app.bot.radio_manager = radio_manager
+    app.state.quiz_manager = quiz_manager
+
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
