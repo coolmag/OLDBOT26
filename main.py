@@ -74,24 +74,24 @@ async def lifespan(app: FastAPI):
     
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager)
-    
     downloader = YouTubeDownloader(settings, cache)
     
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
     
     radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
+    # Инициализация викторины
+    from quiz_service import QuizManager
     quiz_manager = QuizManager(settings, downloader, chat_manager)
     
-    # Привязываем менеджеры к боту и приложению для взаимного доступа
-    tg_app.bot.quiz_manager = quiz_manager 
-    tg_app.bot.radio_manager = radio_manager
-    app.state.quiz_manager = quiz_manager
-
+    # ⚠️ ИСПРАВЛЕНИЕ: Храним менеджеры в bot_data (официальный путь), а не в самом боте!
+    tg_app.bot_data['radio_manager'] = radio_manager
+    tg_app.bot_data['quiz_manager'] = quiz_manager
+    
+    # Привязываем к application, чтобы хендлеры могли их достать
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
-    tg_app.radio_manager = radio_manager
     tg_app.settings = settings
     tg_app.cache = cache
     
@@ -101,7 +101,6 @@ async def lifespan(app: FastAPI):
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
     
-    # 🔥 МАГИЯ: Запускаем подключение к ТГ в фоне
     startup_task = asyncio.create_task(lazy_startup_tasks(app))
     
     yield

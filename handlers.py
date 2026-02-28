@@ -80,7 +80,7 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
 async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE):
     effective_query = query or "случайные популярные треки"
     await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{effective_query}*", parse_mode=ParseMode.MARKDOWN)
-    radio_manager = context.application.radio_manager
+    radio_manager = context.bot_data['radio_manager']
     import asyncio
     asyncio.create_task(radio_manager.start(chat_id, effective_query))
 
@@ -120,7 +120,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = message.text
 
     # 🎮 АБСОЛЮТНАЯ ИЗОЛЯЦИЯ ВИКТОРИНЫ (Через новый сервис!)
-    quiz_manager = context.application.quiz_manager
+    quiz_manager = context.bot_data['quiz_manager']
     if quiz_manager.is_active(chat_id):
         if message_text.startswith('/'): return
         
@@ -158,8 +158,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ"
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    quiz_mgr = context.application.quiz_manager
-    radio_mgr = context.application.radio_manager
+    quiz_mgr = context.bot_data['quiz_manager']
+    radio_mgr = context.bot_data['radio_manager']
     import asyncio
     asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot, radio_mgr))
 
@@ -181,12 +181,12 @@ async def radio_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _do_radio(update.effective_chat.id, " ".join(context.args), context)
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    radio_manager = context.application.radio_manager
+    radio_manager = context.bot_data['radio_manager']
     if await radio_manager.stop(update.effective_chat.id):
         await context.bot.send_message(update.effective_chat.id, "🛑 Радио остановлено.")
 
 async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    radio_manager = context.application.radio_manager
+    radio_manager = context.bot_data['radio_manager']
     await radio_manager.skip(update.effective_chat.id)
     await context.bot.send_message(update.effective_chat.id, "⏭ Переключаю трек...", disable_notification=True)
 
@@ -231,7 +231,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "skip_track":
-        await context.application.radio_manager.skip(update.effective_chat.id)
+        radio_manager = context.bot_data['radio_manager']
+        await radio_manager.skip(update.effective_chat.id)
         return
 
     if query.data.startswith("set_mode|"):
