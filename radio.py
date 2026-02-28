@@ -159,13 +159,14 @@ class RadioSession:
                 if time.time() - self.last_quiz_time > 900:
                     self.last_quiz_time = time.time()
                     
-                    # Запрашиваем QuizManager из Telegram Application (переданного в боте)
-                    # Чтобы не делать круговых импортов, берем его из контекста
+                    # 🔥 FIX: Достаем оба менеджера, которые мы пробросили в main.py
                     quiz_mgr = getattr(self.bot, 'quiz_manager', None)
-                    if quiz_mgr:
+                    radio_mgr = getattr(self.bot, 'radio_manager', None)
+
+                    if quiz_mgr and radio_mgr:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
-                        # Мы НЕ ждем конца викторины здесь, мы просто запускаем её как фоновую задачу
-                        asyncio.create_task(quiz_mgr.start_quiz(self.chat_id, self.bot, self.bot.radio_manager))
+                        # Передаем именно инстанс radio_mgr, а не self.bot.radio_manager
+                        asyncio.create_task(quiz_mgr.start_quiz(self.chat_id, self.bot, radio_mgr))
                         # Мгновенно уходим на следующий виток цикла (он встанет на паузу из-за quiz_active=True)
                         continue
 

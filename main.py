@@ -88,6 +88,10 @@ async def lifespan(app: FastAPI):
     tg_app.bot_data['radio_manager'] = radio_manager
     tg_app.bot_data['quiz_manager'] = quiz_manager
     
+    # 🔥 FIX: Пробрасываем менеджеры в сам бот, чтобы RadioSession мог их достать
+    tg_app.bot.radio_manager = radio_manager
+    tg_app.bot.quiz_manager = quiz_manager
+    
     # Привязываем к application, чтобы хендлеры могли их достать
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
