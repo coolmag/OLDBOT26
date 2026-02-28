@@ -52,6 +52,9 @@ def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     return random.choice(all_queries) if all_queries else ("top hits", None, "Random")
 
 
+from quiz_service import QuizManager
+
+
 @dataclass
 class RadioSession:
     chat_id: int
@@ -59,6 +62,8 @@ class RadioSession:
     downloader: YouTubeDownloader
     settings: Settings
     chat_manager: ChatManager
+    quiz_manager: QuizManager  #  injected
+    radio_manager: 'RadioManager' # injected
     query: str
     display_name: str
     chat_type: Optional[str] = None
@@ -159,15 +164,9 @@ class RadioSession:
                 if time.time() - self.last_quiz_time > 900:
                     self.last_quiz_time = time.time()
                     
-                    # 🔥 FIX: Достаем оба менеджера, которые мы пробросили в main.py
-                    quiz_mgr = getattr(self.bot, 'quiz_manager', None)
-                    radio_mgr = getattr(self.bot, 'radio_manager', None)
-
-                    if quiz_mgr and radio_mgr:
+                    if self.quiz_manager and self.radio_manager:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
-                        # Передаем именно инстанс radio_mgr, а не self.bot.radio_manager
-                        asyncio.create_task(quiz_mgr.start_quiz(self.chat_id, self.bot, radio_mgr))
-                        # Мгновенно уходим на следующий виток цикла (он встанет на паузу из-за quiz_active=True)
+                        asyncio.create_task(self.quiz_manager.start_quiz(self.chat_id, self.bot, self.radio_manager))
                         continue
 
                 # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
@@ -317,8 +316,8 @@ class RadioSession:
                 except: pass
 
 class RadioManager:
-    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager):
-        self._bot, self._settings, self._downloader, self._chat_manager = bot, settings, downloader, chat_manager
+    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager):
+        self._bot, self._settings, self._downloader, self._chat_manager, self._quiz_manager = bot, settings, downloader, chat_manager, quiz_manager
         self._sessions: Dict[int, RadioSession] = {}
         self._locks: Dict[int, asyncio.Lock] = {}
 
@@ -336,10 +335,17 @@ class RadioManager:
                 if not display_name: display_name = random_display_name
 
             session = RadioSession(
-                chat_id=chat_id, bot=self._bot, downloader=self._downloader, 
-                settings=self._settings, chat_manager=self._chat_manager,
-                query=query, display_name=(display_name or query), 
-                decade=decade, chat_type=chat_type
+                chat_id=chat_id, 
+                bot=self._bot, 
+                downloader=self._downloader, 
+                settings=self._settings, 
+                chat_manager=self._chat_manager,
+                quiz_manager=self._quiz_manager,
+                radio_manager=self,
+                query=query, 
+                display_name=(display_name or query), 
+                decade=decade, 
+                chat_type=chat_type
             )
             self._sessions[chat_id] = session
             await session.start()

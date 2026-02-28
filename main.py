@@ -79,18 +79,19 @@ async def lifespan(app: FastAPI):
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
     
-    radio_manager = RadioManager(bot=tg_app.bot, settings=settings, downloader=downloader, chat_manager=chat_manager)
-    # Инициализация викторины
-    from quiz_service import QuizManager
+    # Сначала викторина, потом радио, чтобы передать зависимость
     quiz_manager = QuizManager(settings, downloader, chat_manager)
+    radio_manager = RadioManager(
+        bot=tg_app.bot, 
+        settings=settings, 
+        downloader=downloader, 
+        chat_manager=chat_manager,
+        quiz_manager=quiz_manager # Внедряем зависимость
+    )
     
     # ⚠️ ИСПРАВЛЕНИЕ: Храним менеджеры в bot_data (официальный путь), а не в самом боте!
     tg_app.bot_data['radio_manager'] = radio_manager
     tg_app.bot_data['quiz_manager'] = quiz_manager
-    
-    # 🔥 FIX: Пробрасываем менеджеры в сам бот, чтобы RadioSession мог их достать
-    tg_app.bot.radio_manager = radio_manager
-    tg_app.bot.quiz_manager = quiz_manager
     
     # Привязываем к application, чтобы хендлеры могли их достать
     tg_app.ai_manager = ai_manager
