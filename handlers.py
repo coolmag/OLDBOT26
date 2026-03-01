@@ -159,9 +159,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ"
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_mgr = context.bot_data['quiz_manager']
-    radio_mgr = context.bot_data['radio_manager']
     import asyncio
-    asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot, radio_mgr))
+    # 🟢 Убрали передачу radio_mgr
+    asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot)) 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎧 Aurora AI DJ. Включаю радио или ищу треки. С чего начнем?")
@@ -193,13 +193,19 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
-    is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
+    
+    # 🟢 БЕЗОПАСНАЯ ПРОВЕРКА АДМИНА
+    admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
+    admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
+    admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))
+    
+    is_admin = user_id in admin_ids
 
     if not is_admin:
         await update.message.reply_text(f"⛔️ Вы не админ.\nВаш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
         return
 
-    current_mode = context.application.chat_manager.get_mode(update.effective_chat.id)
+    current_mode = await context.application.chat_manager.get_mode(update.effective_chat.id)
     
     mode_names = { 
         "default": "Эстет", "standup": "Комик", "expert": "Эксперт", 
@@ -236,13 +242,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data.startswith("set_mode|"):
-        is_admin = (user_id in settings.ADMIN_ID_LIST) or (str(user_id) in str(settings.ADMIN_IDS))
+        # 🟢 БЕЗОПАСНАЯ ПРОВЕРКА АДМИНА
+        admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
+        admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
+        admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))
+        is_admin = user_id in admin_ids
+
         if not is_admin:
             await query.answer("⛔️ Только для админа!", show_alert=True)
             return
             
         mode = query.data.split("|")[1]
-        context.application.chat_manager.set_mode(update.effective_chat.id, mode)
+        await context.application.chat_manager.set_mode(update.effective_chat.id, mode)
         greeting = random.choice(GREETINGS.get(mode, ["Привет!"]))
         await context.bot.send_message(update.effective_chat.id, greeting)
         await query.delete_message()

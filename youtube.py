@@ -101,8 +101,15 @@ class YouTubeDownloader:
             if sc_res.success:
                 sc_res.track_info = track_info
                 return sc_res
+
+            # 🟢 ДОБАВЛЕНО: Если SC не нашел, качаем с YouTube по ID!
+            logger.warning(f"🔴 [YouTube Native] SoundCloud failed. Pulling from YT directly: {video_id}")
+            yt_res = await self._download_youtube_native(video_id, final_path)
+            if yt_res.success:
+                yt_res.track_info = track_info
+                return yt_res
                 
-        return DownloadResult(success=False, error_message="SoundCloud download failed")
+        return DownloadResult(success=False, error_message="All download methods failed")
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_sc_temp")
@@ -144,6 +151,34 @@ class YouTubeDownloader:
             logger.error(f"SoundCloud fallback failed: {e}")
         return DownloadResult(success=False, error_message="SC Fallback failed or track rejected")
 
+    # 🟢 ДОБАВЛЕН НОВЫЙ МЕТОД:
+    async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:
+        temp_path = str(target_path).replace(".mp3", "_yt_temp")
+        opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': temp_path,
+            'quiet': True,
+            'noprogress': True,
+            'max_filesize': 25000000, 
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+        }
+        try:
+            loop = asyncio.get_running_loop()
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, url))
+            
+            paths = [Path(temp_path + ".mp3"), Path(temp_path)]
+            for p in paths:
+                if p.exists() and p.stat().st_size > 10000:
+                    if p != target_path:
+                        if target_path.exists(): target_path.unlink(missing_ok=True)
+                        p.rename(target_path)
+                    logger.info(f"✅ Success via Native YouTube: {video_id}") 
+                    return DownloadResult(success=True, file_path=target_path)
+        except Exception as e:
+            logger.error(f"Native YouTube fallback failed for {video_id}: {e}")
+        return DownloadResult(success=False, error_message="YT Native failed")
+
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
             loop = asyncio.get_running_loop()
@@ -153,7 +188,9 @@ class YouTubeDownloader:
             track_info = TrackInfo(identifier=details['videoId'], title=details['title'], uploader=details.get('author', ''), duration=int(details.get('lengthSeconds', 0)), url=f"https://music.youtube.com/watch?v={details['videoId']}", thumbnail_url=details['thumbnail']['thumbnails'][-1]['url'] if details.get('thumbnail') else None, source=Source.YOUTUBE)
             await self._cache.set(f"trackinfo:{video_id}", dataclasses.asdict(track_info), ttl=3600 * 24 * 7)
             return track_info
-        except Exception:
+        except Exception as e:
+            # 🟢 Логируем ошибки парсинга, чтобы не гадать, почему треки без инфы
+            logger.error(f"Error reading from YTMusic details for {video_id}: {e}")
             return None
 
     async def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:

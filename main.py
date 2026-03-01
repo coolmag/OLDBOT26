@@ -2,6 +2,7 @@ import asyncio
 import logging
 import shutil
 import os
+import time # 🟢 Добавить наверх, если нет
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -50,6 +51,11 @@ async def lazy_startup_tasks(app: FastAPI):
             if settings.WEBHOOK_URL:
                 await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL)
                 logger.info(f"🔗 Webhook set to: {settings.WEBHOOK_URL}")
+            else:
+                # 🟢 ЕСЛИ НЕТ ВЕБХУКА - ЗАПУСКАЕМ ОПРОС (POLLING)
+                if tg_app.updater:
+                    await tg_app.updater.start_polling()
+                    logger.info("📡 Webhook URL not found. Started Long Polling!")
             
             connected = True
             logger.info("🚀 Бот успешно подключен к Telegram API!")
@@ -57,6 +63,24 @@ async def lazy_startup_tasks(app: FastAPI):
             logger.warning(f"⚠️ Сеть недоступна (Попытка {attempt}). Ждем 5 сек... Ошибка: {e}")
             attempt += 1
             await asyncio.sleep(5)
+
+    # 🟢 Обновленный сборщик мусора
+    downloads_dir = settings.DOWNLOADS_DIR
+    while True:
+        try:
+            now = time.time()
+            # Проверяем все временные расширения
+            for ext in ("*.mp3", "*.mp4", "*.ogg"): 
+                for file_path in downloads_dir.glob(ext):
+                    # Если файлу больше часа (3600 сек) - удаляем
+                    if file_path.is_file() and now - file_path.stat().st_mtime > 3600:
+                        try:
+                            file_path.unlink()
+                            logger.debug(f"🗑 Сборщик мусора удалил: {file_path.name}")
+                        except Exception as e: pass
+        except Exception as e:
+            logger.error(f"Cleanup task error: {e}")
+        await asyncio.sleep(600)
 
 
 @asynccontextmanager
@@ -73,14 +97,14 @@ async def lifespan(app: FastAPI):
     await cache.initialize()
     
     ai_manager = AIManager(settings)
-    chat_manager = ChatManager(ai_manager)
+    chat_manager = ChatManager(ai_manager, cache) # 🟢 Передали cache
     downloader = YouTubeDownloader(settings, cache)
     
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
     
     # Сначала викторина, потом радио, чтобы передать зависимость
-    quiz_manager = QuizManager(settings, downloader, chat_manager)
+    quiz_manager = QuizManager(settings, downloader, chat_manager, cache) # 🟢 Передали cache
     radio_manager = RadioManager(
         bot=tg_app.bot, 
         settings=settings, 
@@ -113,6 +137,9 @@ async def lifespan(app: FastAPI):
     logger.info("🔻 System Shutting Down...")
     startup_task.cancel()
     await radio_manager.stop_all()
+    # 🟢 Останавливаем updater (polling), если он работал
+    if tg_app.updater and tg_app.updater.running:
+        await tg_app.updater.stop() 
     await tg_app.stop()
     await tg_app.shutdown()
     await cache.close()

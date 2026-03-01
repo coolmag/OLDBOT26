@@ -31,10 +31,11 @@ def is_fuzzy_match(user_input: str, target: str) -> bool:
 
 
 class QuizManager:
-    def __init__(self, settings, downloader, chat_manager):
+    def __init__(self, settings, downloader, chat_manager, cache): # 🟢 Добавили cache
         self.settings = settings
         self.downloader = downloader
         self.chat_manager = chat_manager
+        self.cache = cache
         self.sessions = {} 
         self.scores = {}
 
@@ -79,22 +80,23 @@ class QuizManager:
             session['active'] = False
             session['event'].set() 
             
-            self.scores[user_id] = self.scores.get(user_id, 0) + 1
+            # 🟢 Сохраняем в БД навсегда
+            current_score = await self.cache.get(f"score_{user_id}") or 0
+            new_score = current_score + 1
+            await self.cache.set(f"score_{user_id}", new_score, ttl=0)
+            self.scores[user_id] = new_score
             
-            praise_prompt = f"В викторине юзер {user_name} только что первым угадал песню ({text})! Это был трек: {session['full']}. Похвали его очень круто в своем стиле и скажи, что у него теперь {self.scores[user_id]} очков!"
+            praise_prompt = f"В викторине юзер {user_name} только что первым угадал песню ({text})! Это был трек: {session['full']}. Похвали его очень круто в своем стиле и скажи, что у него теперь {new_score} очков!"
             announcement = await self.chat_manager.get_response(chat_id, praise_prompt, "System")
             await bot.send_message(chat_id, f"🎉 🎙 {announcement}")
             return True
             
         return False 
 
-    async def start_quiz(self, chat_id: int, bot: Bot, radio_manager):
+    async def start_quiz(self, chat_id: int, bot: Bot):
         if self.is_active(chat_id):
             await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте видео-сообщение и пишите варианты в чат.")
             return
-
-        radio_session = radio_manager._sessions.get(chat_id)
-        if radio_session: radio_session.quiz_active = True
         
         self.sessions[chat_id] = {'active': True, 'event': asyncio.Event()}
         msg = await bot.send_message(chat_id, "🎲 <i>Настраиваю видео-камеры для викторины...</i>", parse_mode=ParseMode.HTML)
@@ -104,7 +106,7 @@ class QuizManager:
 
         if not tracks:
             await msg.edit_text("❌ Ошибка поиска треков.")
-            self._cleanup(chat_id, radio_session)
+            self._cleanup(chat_id)
             return
 
         track = random.choice(tracks[:3])
@@ -112,7 +114,7 @@ class QuizManager:
 
         if not dl_res or not dl_res.success or not dl_res.file_path:
             await msg.edit_text("❌ Ошибка загрузки трека.")
-            self._cleanup(chat_id, radio_session)
+            self._cleanup(chat_id)
             return
 
         info = dl_res.track_info
@@ -139,11 +141,22 @@ class QuizManager:
                 output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
                 cmd = ['ffmpeg', '-y', '-i', input_audio, '-ss', str(start_time), '-t', '15', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', '-ar', '48000', output_video]
 
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await proc.wait()
+            # 🟢 Захватываем stdout и stderr вместо DEVNULL
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, 
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+
+            # 🟢 Проверяем код ошибки и пишем в лог причину падения!
+            if proc.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='ignore')
+                logger.error(f"FFmpeg failed with code {proc.returncode}. Details: {error_msg}")
+                raise Exception("FFmpeg rendering failed")
 
             if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
-                raise Exception("FFmpeg failed")
+                raise Exception("FFmpeg output file is missing or empty")
 
             await msg.delete()
 
@@ -175,16 +188,10 @@ class QuizManager:
             logger.error(f"Quiz run error: {e}")
             await bot.send_message(chat_id, "❌ Сбой аппаратуры.")
         finally:
-            self._cleanup(chat_id, radio_session)
-            if getattr(dl_res, 'is_url', False) == False and os.path.exists(input_audio): 
-                try: os.unlink(input_audio)
-                except: pass
-            if os.path.exists(output_video): 
-                try: os.unlink(output_video)
-                except: pass
+            self._cleanup(chat_id)
+            # 🔴 УДАЛИТЕ СТРОКИ С os.unlink(input_audio) и os.unlink(output_video)
+            # Теперь за удаление отвечает глобальный Garbage Collector!
 
-    def _cleanup(self, chat_id, radio_session):
+    def _cleanup(self, chat_id):
         if chat_id in self.sessions:
             self.sessions[chat_id]['active'] = False
-        if radio_session:
-            radio_session.quiz_active = False

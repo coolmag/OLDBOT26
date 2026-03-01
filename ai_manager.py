@@ -94,23 +94,34 @@ class AIManager:
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
         if "GoogleAI" in self.providers:
+            full_prompt = f"{system_prompt}\n\nUser: {prompt}"
+            
+            # 🟢 Делаем 2 попытки генерации
+            for attempt in range(2):
+                try:
+                    response = self.gemini_client.models.generate_content(
+                        model="gemma-3-27b-it",
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(temperature=0.9)
+                    )
+                    logger.info("💬 Gemma 3 27B (Chat) responded.")
+                    return response.text
+                except Exception as e:
+                    logger.error(f"❌ Gemma 3 attempt {attempt+1} failed: {e}")
+                    import asyncio
+                    await asyncio.sleep(1) # Ждем 1 секунду перед повтором
+                    
+            # 🟢 Фолбэк на Flash, если Gemma 3 упала оба раза
             try:
-                full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-                # 🔥 GEMMA 3 ГЕНЕРИРУЕТ ТОЛЬКО ШУТКИ И ЧАТ (Креативность 0.9)
+                logger.warning("🔄 Falling back to Gemini Flash for Chat")
                 response = self.gemini_client.models.generate_content(
-                    model="gemma-3-27b-it",
-                    contents=full_prompt,
+                    model="gemini-2.5-flash", 
+                    contents=full_prompt, 
                     config=types.GenerateContentConfig(temperature=0.9)
                 )
-                logger.info("💬 Gemma 3 27B (Chat) responded.")
                 return response.text
             except Exception as e:
-                logger.error(f"❌ Gemma 3 chat failed: {e}")
-                # Если Gemma упала, страхует Flash
-                try:
-                    response = self.gemini_client.models.generate_content(model="gemini-2.5-flash", contents=full_prompt, config=types.GenerateContentConfig(temperature=0.9))
-                    return response.text
-                except: pass
+                logger.error(f"❌ Flash fallback failed: {e}")
 
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
 

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import pickle
+import json # 🟢 Меняем pickle на json
 from pathlib import Path
 from typing import Optional, Any, Union
 import aiosqlite
@@ -35,22 +35,25 @@ class CacheService:
             self._db = None
 
     async def get(self, key: str) -> Optional[Any]:
-        """Получение значения из кэша с проверкой срока годности."""
-        if not self._db:
-            return None
-        
+        if not self._db: return None
         try:
             async with self._lock:
-                cursor = await self._db.execute(
-                    "SELECT value, expires_at FROM cache WHERE key = ?", (key,)
-                )
+                cursor = await self._db.execute("SELECT value, expires_at FROM cache WHERE key = ?", (key,))
                 row = await cursor.fetchone()
                 if row:
                     value, expires_at = row
                     if expires_at is None or datetime.fromisoformat(expires_at) > datetime.now():
-                        return pickle.loads(value)
+                        # 🟢 Защита от старых данных pickle
+                        try:
+                            decoded = value.decode('utf-8') if isinstance(value, bytes) else value
+                            return json.loads(decoded)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            # Данные от старой версии с pickle. Безжалостно сносим.
+                            logger.warning(f"Purged legacy pickle data for key {key}")
+                            await self._db.execute("DELETE FROM cache WHERE key = ?", (key,))
+                            await self._db.commit()
+                            return None
                     else:
-                        # Запись просрочена, удаляем ее
                         await self._db.execute("DELETE FROM cache WHERE key = ?", (key,))
                         await self._db.commit()
                 return None
@@ -59,23 +62,12 @@ class CacheService:
             return None
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = 3600) -> bool:
-        """
-        Сохранение значения в кэш с указанием времени жизни.
-        :param key: Ключ
-        :param value: Значение
-        :param ttl: Время жизни в секундах. None или 0 означает "вечно".
-        """
-        if not self._db:
-            return False
-        
+        if not self._db: return False
         try:
             async with self._lock:
-                serialized = pickle.dumps(value)
-                if ttl is not None and ttl > 0:
-                    expires_at = datetime.now() + timedelta(seconds=ttl)
-                    expires_at_iso = expires_at.isoformat()
-                else:
-                    expires_at_iso = None
+                # 🟢 Безопасная сериализация в JSON
+                serialized = json.dumps(value).encode('utf-8')
+                expires_at_iso = (datetime.now() + timedelta(seconds=ttl)).isoformat() if ttl else None
 
                 await self._db.execute(
                     "INSERT OR REPLACE INTO cache (key, value, expires_at) VALUES (?, ?, ?)",

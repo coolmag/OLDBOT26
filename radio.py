@@ -143,7 +143,9 @@ class RadioSession:
                     self.playlist.extend(new_tracks)
                     found_new = True
                     break
-            except Exception: pass
+            except Exception as e:
+                # 🟢 Теперь мы увидим, если YouTube отвалился по API лимитам
+                logger.warning(f"Failed to fetch tracks for query '{q}': {e}")
         
         if not found_new:
             if len(self.played_ids) > 10:
@@ -155,18 +157,17 @@ class RadioSession:
     async def _radio_loop(self):
         while self.is_running:
             try:
-                # ⏸ ЕСЛИ ИДЕТ ВИКТОРИНА - РАДИО СТОИТ НА ПАУЗЕ!
-                if getattr(self, 'quiz_active', False):
+                # 🟢 Теперь радио просто смотрит в QuizManager. Никакой магии с флагами!
+                if self.quiz_manager and self.quiz_manager.is_active(self.chat_id):
                     await asyncio.sleep(2)
                     continue
 
-                # 🎮 АВТО-ВИКТОРИНА РАЗ В 15 МИНУТ (900 секунд)
+                # 🎮 АВТО-ВИКТОРИНА (убираем передачу self.radio_manager)
                 if time.time() - self.last_quiz_time > 900:
                     self.last_quiz_time = time.time()
-                    
-                    if self.quiz_manager and self.radio_manager:
+                    if self.quiz_manager:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
-                        asyncio.create_task(self.quiz_manager.start_quiz(self.chat_id, self.bot, self.radio_manager))
+                        asyncio.create_task(self.quiz_manager.start_quiz(self.chat_id, self.bot))
                         continue
 
                 # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
@@ -185,7 +186,7 @@ class RadioSession:
                     
                     available_modes = list(PERSONAS.keys())
                     new_mode = random.choice(available_modes)
-                    self.chat_manager.set_mode(self.chat_id, new_mode)
+                    await self.chat_manager.set_mode(self.chat_id, new_mode)
                     
                     prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. А еще у меня внезапно сменилось настроение на 100%! Напиши классный, сбивающий с толку анонс об этом в чат в своем стиле."
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
@@ -310,10 +311,6 @@ class RadioSession:
         except Exception as e: 
             logger.error(f"[{self.chat_id}] CRITICAL SEND ERROR: {e}", exc_info=True)
             return False
-        finally:
-            if result and not result.is_url and result.file_path and Path(result.file_path).exists():
-                try: os.unlink(result.file_path)
-                except: pass
 
 class RadioManager:
     def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager):
