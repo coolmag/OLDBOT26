@@ -1,23 +1,21 @@
-# Используем легкий и надежный образ Python
+# Берем легкий образ Linux с Python 3.11
 FROM python:3.11-slim
 
-# Рабочая директория
-WORKDIR /app
-
-# ⚠️ Добавили кодеки для видео-кружочков
+# Устанавливаем системные пакеты: ffmpeg (для звука) и nodejs (для yt-dlp)
 RUN apt-get update && \
-    apt-get install -y ffmpeg libopus-dev libx264-dev && \
+    apt-get install -y ffmpeg nodejs && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Копируем зависимости
-COPY requirements.txt .
+# Создаем рабочую папку
+WORKDIR /app
 
-# Устанавливаем библиотеки Питона
+# Копируем список библиотек и устанавливаем их
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем код нашего бота
+# Копируем весь остальной код проекта
 COPY . .
 
-# Railway сам подставит сюда порт (например, 8080)
-# Запускаем Uvicorn напрямую
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# Запускаем FastAPI сервер (Railway сам пробросит порт)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
