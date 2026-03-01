@@ -48,7 +48,7 @@ class QuizManager:
         
         is_match = False
         
-        # 🛡️ ПЛАН А: Умный ИИ-Судья (Gemini Flash)
+        # 🛡️ ПЛАН А: Умный ИИ-Судья (Теперь на Gemma 3 + правильный Async)
         try:
             prompt = f"""
             Сейчас идет викторина "Угадай мелодию". Правильный ответ: {session['full']}.
@@ -57,10 +57,11 @@ class QuizManager:
             Если ответ ПРАВИЛЬНЫЙ (даже с опечатками или на другом языке, "Мияги"="Miyagi"), напиши ровно одно слово: ДА.
             Если ответ НЕВЕРНЫЙ, напиши ровно одно слово: НЕТ.
             """
-            # Добавили таймаут на случай, если Google "завис"
+            
+            # 🟢 ИСПРАВЛЕНИЕ: Используем .aio.models.generate_content и модель Gemma
             ai_verdict = await asyncio.wait_for(
-                self.chat_manager.ai_manager.gemini_client.models.generate_content_async(
-                    model="gemini-2.5-flash", 
+                self.chat_manager.ai_manager.gemini_client.aio.models.generate_content(
+                    model="gemma-3-27b-it", # 🟢 Переключили на Gemma, чтобы не жрать лимиты Flash
                     contents=prompt
                 ),
                 timeout=5.0
