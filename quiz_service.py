@@ -31,11 +31,11 @@ def is_fuzzy_match(user_input: str, target: str) -> bool:
 
 
 class QuizManager:
-    def __init__(self, settings, downloader, chat_manager, cache): # 🟢 Добавили cache
+    def __init__(self, settings, downloader, chat_manager, cache):
         self.settings = settings
         self.downloader = downloader
         self.chat_manager = chat_manager
-        self.cache = cache
+        self.cache = cache  # База данных для вечного хранения очков
         self.sessions = {} 
         self.scores = {}
 
@@ -44,11 +44,14 @@ class QuizManager:
 
     async def process_answer(self, chat_id: int, user_id: int, user_name: str, text: str, bot: Bot) -> bool:
         session = self.sessions.get(chat_id)
-        if not session or not session['active']: return False
         
+        # 🟢 ЗАЩИТА (Гонка потоков): Если юзер пишет в чат, пока видео еще рендерится (ответа еще нет в сессии)
+        if not session or not session.get('active') or 'full' not in session: 
+            return False
+            
         is_match = False
         
-        # 🛡️ ПЛАН А: Умный ИИ-Судья (Теперь на Gemma 3 + правильный Async)
+        # 🛡️ ПЛАН А: Умный ИИ-Судья (На модели Gemma 3)
         try:
             prompt = f"""
             Сейчас идет викторина "Угадай мелодию". Правильный ответ: {session['full']}.
@@ -57,11 +60,10 @@ class QuizManager:
             Если ответ ПРАВИЛЬНЫЙ (даже с опечатками или на другом языке, "Мияги"="Miyagi"), напиши ровно одно слово: ДА.
             Если ответ НЕВЕРНЫЙ, напиши ровно одно слово: НЕТ.
             """
-            
-            # 🟢 ИСПРАВЛЕНИЕ: Используем .aio.models.generate_content и модель Gemma
+            # Правильный асинхронный вызов Google GenAI API
             ai_verdict = await asyncio.wait_for(
                 self.chat_manager.ai_manager.gemini_client.aio.models.generate_content(
-                    model="gemma-3-27b-it", # 🟢 Переключили на Gemma, чтобы не жрать лимиты Flash
+                    model="gemma-3-27b-it", 
                     contents=prompt
                 ),
                 timeout=5.0
@@ -71,17 +73,17 @@ class QuizManager:
                 is_match = True
                 
         except Exception as e:
-            # 🛡️ ПЛАН Б: ИИ упал (лимиты/ошибка). Включаем резервный локальный алгоритм!
+            # 🛡️ ПЛАН Б: ИИ упал. Включаем резервный локальный алгоритм!
             logger.warning(f"⚠️ ИИ-Судья недоступен ({e}). Переход на локальный Fuzzy Match.")
             if is_fuzzy_match(text, session['artist']) or is_fuzzy_match(text, session['title']):
                 is_match = True
 
-        # Если юзер угадал (неважно каким способом)
+        # Если юзер угадал
         if is_match:
             session['active'] = False
             session['event'].set() 
             
-            # 🟢 Сохраняем в БД навсегда
+            # Сохраняем очки в вечную БД, чтобы они не пропадали при перезагрузке бота
             current_score = await self.cache.get(f"score_{user_id}") or 0
             new_score = current_score + 1
             await self.cache.set(f"score_{user_id}", new_score, ttl=0)
@@ -142,7 +144,7 @@ class QuizManager:
                 output_video = str(self.settings.DOWNLOADS_DIR / f"quiz_{track.identifier}.ogg")
                 cmd = ['ffmpeg', '-y', '-i', input_audio, '-ss', str(start_time), '-t', '15', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', '-ar', '48000', output_video]
 
-            # 🟢 Захватываем stdout и stderr вместо DEVNULL
+            # Правильный перехват потоков FFmpeg
             proc = await asyncio.create_subprocess_exec(
                 *cmd, 
                 stdout=asyncio.subprocess.PIPE, 
@@ -150,7 +152,6 @@ class QuizManager:
             )
             stdout, stderr = await proc.communicate()
 
-            # 🟢 Проверяем код ошибки и пишем в лог причину падения!
             if proc.returncode != 0:
                 error_msg = stderr.decode('utf-8', errors='ignore')
                 logger.error(f"FFmpeg failed with code {proc.returncode}. Details: {error_msg}")
@@ -170,6 +171,7 @@ class QuizManager:
                 if output_video.endswith('.mp4'): await bot.send_video_note(chat_id, video_note=f, length=480)
                 else: await bot.send_voice(chat_id, voice=f.read(), filename="quiz.ogg")
 
+            # 🟢 В этот момент записываем правильный ответ в память (До этого момента никто не мог его угадать и сломать бота)
             self.sessions[chat_id].update({
                 'artist': info.artist,
                 'title': info.title,
@@ -190,8 +192,7 @@ class QuizManager:
             await bot.send_message(chat_id, "❌ Сбой аппаратуры.")
         finally:
             self._cleanup(chat_id)
-            # 🔴 УДАЛИТЕ СТРОКИ С os.unlink(input_audio) и os.unlink(output_video)
-            # Теперь за удаление отвечает глобальный Garbage Collector!
+            # Удаление файлов отключено: за это теперь отвечает Garbage Collector в main.py
 
     def _cleanup(self, chat_id):
         if chat_id in self.sessions:
