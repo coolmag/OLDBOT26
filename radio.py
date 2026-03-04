@@ -189,12 +189,19 @@ class RadioSession:
                     await asyncio.sleep(2)
                     continue
 
-                # 🎮 АВТО-ВИКТОРИНА (убираем передачу self.radio_manager)
+                # 🎮 АВТО-ВИКТОРИНА РАЗ В 15 МИНУТ
                 if time.time() - self.last_quiz_time > 900:
                     self.last_quiz_time = time.time()
                     if self.quiz_manager:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
-                        asyncio.create_task(self.quiz_manager.start_quiz(self.chat_id, self.bot))
+                        
+                        # 1. ЖДЕМ ЗАВЕРШЕНИЯ ВИКТОРИНЫ (await вместо create_task)
+                        await self.quiz_manager.start_quiz(self.chat_id, self.bot)
+                        
+                        # 2. После викторины делаем небольшую паузу (5 сек), чтобы люди успели прочитать результаты
+                        await asyncio.sleep(5)
+                        
+                        # 3. Идем на следующий круг (чтобы скачать новую музыку, а не ту, что пересеклась)
                         continue
 
                 # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
