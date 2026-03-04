@@ -1,9 +1,11 @@
 import asyncio
-import logging  # ⚠️ ЭТОТ ИМПОРТ ДОЛЖЕН БЫТЬ
+import logging
 import random
 import os
 import time
 import json
+import edge_tts
+import re
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 from dataclasses import dataclass, field
@@ -191,7 +193,30 @@ class RadioSession:
                     prompt = f"Прошел час. Я меняю музыкальную пластинку на жанр: '{self.display_name}'. А еще у меня внезапно сменилось настроение на 100%! Напиши классный, сбивающий с толку анонс об этом в чат в своем стиле."
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
                     if announcement:
-                        await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                        try:
+                            # 1. Очищаем текст от эмодзи (чтобы Аврора не читала вслух "смайлик огонь")
+                            clean_text = re.sub(r'[^\w\s\.,!?\-а-яА-ЯёЁa-zA-Z]', '', announcement).strip()
+                            
+                            # 2. Путь для сохранения голосового сообщения
+                            voice_path = self.settings.DOWNLOADS_DIR / f"dj_voice_{self.chat_id}_{int(time.time())}.ogg"
+                            
+                            # 3. Генерируем голос! 
+                            # ru-RU-SvetlanaNeural - женский приятный голос. rate="+10%" - чуть бодрее.
+                            communicate = edge_tts.Communicate(clean_text, "ru-RU-SvetlanaNeural", rate="+10%")
+                            await communicate.save(str(voice_path))
+                            
+                            # 4. Отправляем как настоящее голосовое сообщение (войс)
+                            if voice_path.exists():
+                                with open(voice_path, 'rb') as f:
+                                    await self.bot.send_voice(self.chat_id, voice=f)
+                                os.unlink(voice_path) # Удаляем файл сразу после отправки
+                            else:
+                                raise FileNotFoundError("Voice file not created")
+                                
+                        except Exception as e:
+                            logger.error(f"Voice generation failed: {e}")
+                            # План Б: Если генерация голоса сломалась, просто шлем текстом
+                            await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
                     await asyncio.sleep(2)
 
                 if len(self.playlist) < 3: await self._fill_playlist()
@@ -251,7 +276,30 @@ class RadioSession:
                     
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
                     if announcement:
-                        await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                        try:
+                            # 1. Очищаем текст от эмодзи (чтобы Аврора не читала вслух "смайлик огонь")
+                            clean_text = re.sub(r'[^\w\s\.,!?\-а-яА-ЯёЁa-zA-Z]', '', announcement).strip()
+                            
+                            # 2. Путь для сохранения голосового сообщения
+                            voice_path = self.settings.DOWNLOADS_DIR / f"dj_voice_{self.chat_id}_{int(time.time())}.ogg"
+                            
+                            # 3. Генерируем голос! 
+                            # ru-RU-SvetlanaNeural - женский приятный голос. rate="+10%" - чуть бодрее.
+                            communicate = edge_tts.Communicate(clean_text, "ru-RU-SvetlanaNeural", rate="+10%")
+                            await communicate.save(str(voice_path))
+                            
+                            # 4. Отправляем как настоящее голосовое сообщение (войс)
+                            if voice_path.exists():
+                                with open(voice_path, 'rb') as f:
+                                    await self.bot.send_voice(self.chat_id, voice=f)
+                                os.unlink(voice_path) # Удаляем файл сразу после отправки
+                            else:
+                                raise FileNotFoundError("Voice file not created")
+                                
+                        except Exception as e:
+                            logger.error(f"Voice generation failed: {e}")
+                            # План Б: Если генерация голоса сломалась, просто шлем текстом
+                            await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
                 except Exception as e:
                     logger.error(f"DJ Intro error: {e}")
 
