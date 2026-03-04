@@ -98,17 +98,27 @@ class QuizManager:
 
     async def start_quiz(self, chat_id: int, bot: Bot):
         if self.is_active(chat_id):
-            await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте видео-сообщение и пишите варианты в чат.")
+            try:
+                await bot.send_message(chat_id, "❌ Игра уже идет! Слушайте видео-сообщение и пишите варианты в чат.")
+            except Exception: pass
             return
         
         self.sessions[chat_id] = {'active': True, 'event': asyncio.Event()}
-        msg = await bot.send_message(chat_id, "🎲 <i>Настраиваю видео-камеры для викторины...</i>", parse_mode=ParseMode.HTML)
+        
+        # 🟢 ДОБАВЛЕНА ЗАЩИТА ОТ ТАЙМАУТОВ TELEGRAM (Сетевых сбоев)
+        try:
+            msg = await bot.send_message(chat_id, "🎲 <i>Настраиваю видео-камеры для викторины...</i>", parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"Quiz Network Timeout: Failed to send initial message ({e}). Aborting quiz.")
+            self._cleanup(chat_id)
+            return # Отменяем викторину, если нет связи с Telegram
 
         queries = ["хиты 2000х", "руки вверх", "король и шут", "linkin park", "eminem", "macan", "miyagi", "баста", "anna asti", "zivert", "скриптонит", "t.a.t.u.", "моргенштерн"]
         tracks = await self.downloader.search(random.choice(queries), limit=5)
 
         if not tracks:
-            await msg.edit_text("❌ Ошибка поиска треков.")
+            try: await msg.edit_text("❌ Ошибка поиска треков.")
+            except Exception: pass
             self._cleanup(chat_id)
             return
 
