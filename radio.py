@@ -26,6 +26,31 @@ with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
 # ⚠️ ВОТ ЭТА СТРОКА БЫЛА ПОТЕРЯНА. ОНА КРИТИЧЕСКИ ВАЖНА ДЛЯ ЛОГОВ!
 logger = logging.getLogger(__name__)
 
+
+async def merge_audio(voice_path: str, track_path: str, output_path: str) -> bool:
+    """Аппаратная склейка голоса и трека через FFmpeg"""
+    cmd = [
+        'ffmpeg', '-y',
+        '-i', voice_path,
+        '-i', track_path,
+        '-filter_complex', '[0:a][1:a]concat=n=2:v=0:a=1[out]',
+        '-map', '[out]',
+        '-c:a', 'libmp3lame',
+        '-b:a', '128k',
+        output_path
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0 and Path(output_path).exists():
+            return True
+        logger.error(f"FFmpeg merge error: {stderr.decode('utf-8', 'ignore')}")
+        return False
+    except Exception as e:
+        logger.error(f"Merge execution failed: {e}")
+        return False
+
+
 def format_duration(seconds: int) -> str:
     mins, secs = divmod(seconds, 60)
     return f"{mins}:{secs:02d}"
@@ -255,55 +280,48 @@ class RadioSession:
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
-                try:
-                    topics = [
-                        "смешную сплетню (можно выдуманную) про",
-                        "какую-нибудь дикую историю с концерта",
-                        "философскую мысль о том, как музыка влияет на людей, а затем упомяни",
-                        "абсурдный и нелепый факт про запись альбома",
-                        "странную привычку музыкантов, а потом поставь",
-                        "короткий музыкальный анекдот, а в конце подведи к",
-                        "что-то про космические корабли, инопланетян и как это связано с песней",
-                        "дерзкую шутку про музыкальных критиков, а затем включи"
-                    ]
-                    random_topic = random.choice(topics)
-                    prompt = f"""Ты в прямом эфире радио! Твоя задача: Расскажи {random_topic} артиста '{track.artist}' или трека '{track.title}'.
-                    ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
-                    1. Отвечай СТРОГО в стиле своей текущей личности.
-                    2. СТРОГИЙ ЗАПРЕТ на фразы: "свидание вслепую", "экзистенциальный ужас", "бессонница". ЗАБУДЬ ИХ!
-                    3. Придумай что-то абсолютно новое, креативное и безумное.
-                    4. Будь кратким (максимум 2-3 предложения)."""
-                    
-                    announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
-                    if announcement:
-                        try:
-                            # 1. Очищаем текст от эмодзи (чтобы Аврора не читала вслух "смайлик огонь")
+                disable_cache = False # По умолчанию кэш работает
+                
+                # Делаем склейку, только если трек реально скачался на диск
+                if result and not result.is_url and result.file_path and Path(result.file_path).exists():
+                    try:
+                        topics = [
+                            "смешную сплетню (можно выдуманную) про",
+                            "какую-нибудь дикую историю с концерта",
+                            "философскую мысль о том, как музыка влияет на людей, а затем упомяни",
+                            "абсурдный факт про запись альбома",
+                            "странную привычку музыкантов, а потом поставь",
+                        ]
+                        prompt = f"Ты радио-диджей. Расскажи {random.choice(topics)} артиста '{track.artist}'. Будь кратким (максимум 2-3 предложения)."
+                        
+                        announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
+                        if announcement:
+                            # 1. Очищаем текст
                             clean_text = re.sub(r'[^\w\s\.,!?\-а-яА-ЯёЁa-zA-Z]', '', announcement).strip()
                             
-                            # 2. Путь для сохранения голосового сообщения
-                            voice_path = self.settings.DOWNLOADS_DIR / f"dj_voice_{self.chat_id}_{int(time.time())}.ogg"
+                            # 2. Пути для файлов
+                            voice_path = str(self.settings.DOWNLOADS_DIR / f"voice_{self.chat_id}.mp3")
+                            merged_path = str(self.settings.DOWNLOADS_DIR / f"merged_{track.identifier}_{int(time.time())}.mp3")
                             
-                            # 3. Генерируем голос! 
-                            # ru-RU-SvetlanaNeural - женский приятный голос. rate="+10%" - чуть бодрее.
+                            # 3. Генерируем голос
                             communicate = edge_tts.Communicate(clean_text, "ru-RU-SvetlanaNeural", rate="+10%")
-                            await communicate.save(str(voice_path))
+                            await communicate.save(voice_path)
                             
-                            # 4. Отправляем как настоящее голосовое сообщение (войс)
-                            if voice_path.exists():
-                                with open(voice_path, 'rb') as f:
-                                    await self.bot.send_voice(self.chat_id, voice=f)
-                                os.unlink(voice_path) # Удаляем файл сразу после отправки
-                            else:
-                                raise FileNotFoundError("Voice file not created")
+                            # 4. СПАИВАЕМ ФАЙЛЫ!
+                            if os.path.exists(voice_path):
+                                is_merged = await merge_audio(voice_path, str(result.file_path), merged_path)
+                                if is_merged:
+                                    # Подменяем оригинальный трек на наш склеенный микс
+                                    result.file_path = merged_path
+                                    disable_cache = True # 🟢 ЗАПРЕЩАЕМ КЭШИРОВАТЬ ЭТОТ УНИКАЛЬНЫЙ МИКС!
                                 
-                        except Exception as e:
-                            logger.error(f"Voice generation failed: {e}")
-                            # План Б: Если генерация голоса сломалась, просто шлем текстом
-                            await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
-                except Exception as e:
-                    logger.error(f"DJ Intro error: {e}")
+                                try: os.unlink(voice_path)
+                                except: pass
+                    except Exception as e:
+                        logger.error(f"DJ Intro merge error: {e}")
 
-                success = await self._send_track(track, result)
+                # Передаем флаг disable_cache в отправку
+                success = await self._send_track(track, result, disable_cache=disable_cache)
                 
                 if success:
                     try: await asyncio.wait_for(self.skip_event.wait(), timeout=180.0)
@@ -315,9 +333,8 @@ class RadioSession:
             except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await asyncio.sleep(5)
         self.is_running = False
 
-    async def _send_track(self, track: TrackInfo, result: DownloadResult) -> bool:
+    async def _send_track(self, track: TrackInfo, result: DownloadResult, disable_cache: bool = False) -> bool:
         try:
-            # ⚠️ Вызываем напрямую, без само-импортов
             caption = get_now_playing_message(track, self.display_name)
             markup = None
             if self.chat_type != ChatType.CHANNEL:
@@ -336,19 +353,35 @@ class RadioSession:
                 await self._delete_status()
                 return True
 
-            cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
-            if cached_file_id:
-                try:
-                    await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
-                    await self._delete_status()
-                    return True
-                except Exception:
-                    await self.downloader._cache.delete(f"file_id:{track.identifier}")
+            # 🟢 Проверяем кэш только если он не запрещен (нет уникальной подводки)
+            if not disable_cache:
+                cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
+                if cached_file_id:
+                    try:
+                        await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=60)
+                        await self._delete_status()
+                        return True
+                    except Exception:
+                        await self.downloader._cache.delete(f"file_id:{track.identifier}")
 
             if audio_source and Path(audio_source).exists():
                 with open(audio_source, 'rb') as f:
-                    msg = await self.bot.send_audio(self.chat_id, audio=f, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=120)
-                    if msg.audio: await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                    # 🟢 Явно прописываем title и performer, чтобы скрыть склейку от пользователя
+                    msg = await self.bot.send_audio(
+                        self.chat_id, 
+                        audio=f, 
+                        caption=caption, 
+                        title=track.title,
+                        performer=track.artist,
+                        parse_mode=ParseMode.MARKDOWN, 
+                        reply_markup=markup, 
+                        read_timeout=120, 
+                        write_timeout=120
+                    )
+                    # Сохраняем в кэш только "чистые" треки без подводки
+                    if msg.audio and not disable_cache: 
+                        await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                
                 await self._delete_status()
                 return True
             return False
