@@ -331,7 +331,7 @@ class RadioSession:
                 success = await self._send_track(track, result, disable_cache=disable_cache)
                 
                 if success:
-                    try: await asyncio.wait_for(self.skip_event.wait(), timeout=600.0)
+                    try: await asyncio.wait_for(self.skip_event.wait(), timeout=360.0)
                     except asyncio.TimeoutError: pass 
                 else: await asyncio.sleep(2)
                 
