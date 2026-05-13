@@ -159,8 +159,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("""Что найти? Введите:
-`/play песня | ваше послание`""", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Что найти? Введите: `/play песня | ваше послание`", parse_mode=ParseMode.MARKDOWN)
         return
     raw_query = " ".join(context.args)
     if "|" in raw_query:
@@ -183,7 +182,6 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(update.effective_chat.id, "⏭ Переключаю трек...", disable_notification=True)
 
 async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(Admin) Устанавливает временный жанр для радио."""
     user_id = update.effective_user.id
     settings = context.application.settings
     
@@ -196,34 +194,29 @@ async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("""🤔 Укажите жанр. Например:
-`/set_genre 80s rock`""", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("🤔 Укажите жанр. Например: `/set_genre 80s rock`", parse_mode=ParseMode.MARKDOWN)
         return
 
     genre = " ".join(context.args)
     radio_manager = context.bot_data.get('radio_manager')
-    chat_type = update.effective_chat.type
     
-    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre, chat_type):
-        await update.message.reply_text(f"✅ Окей, включаю волну по жанру: *{genre}*", parse_mode=ParseMode.MARKDOWN)
+    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre):
+        await update.message.reply_text(f"✅ Окей, временно ставлю жанр: *{genre}*", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("❌ Произошла непредвиденная ошибка при установке жанра.")
+        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
 
 async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Включает треки указанного исполнителя."""
     if not context.args:
-        await update.message.reply_text("""🤔 Укажите исполнителя. Например:
-`/artist Queen`""", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("🤔 Укажите исполнителя. Например: `/artist Queen`", parse_mode=ParseMode.MARKDOWN)
         return
 
     artist = " ".join(context.args)
     radio_manager = context.bot_data.get('radio_manager')
-    chat_type = update.effective_chat.type
 
-    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist, chat_type):
+    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist):
         await update.message.reply_text(f"✅ Понял, сейчас будут только треки *{artist}*", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("❌ Произошла непредвиденная ошибка при включении артиста.")
+        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -296,6 +289,8 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(CommandHandler("skip", skip_command))
+    app.add_handler(CommandHandler("set_genre", set_genre_command))
+    app.add_handler(CommandHandler("artist", artist_command))
     app.add_handler(CommandHandler("quiz", quiz_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

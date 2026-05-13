@@ -18,6 +18,7 @@ from config import Settings
 from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
+from ai_personas import PERSONAS
 
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
     MUSIC_CATALOG = json.load(f)
@@ -94,6 +95,7 @@ class RadioSession:
     decade: Optional[str] = None
     
     is_running: bool = field(init=False, default=False)
+    is_temporary_mode: bool = field(init=False, default=False)
     playlist: List[TrackInfo] = field(default_factory=list)
     played_ids: Set[str] = field(default_factory=set)
     current_task: Optional[asyncio.Task] = field(init=False, default=None)
@@ -124,6 +126,14 @@ class RadioSession:
         logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
+        self.skip_event.set()
+
+    async def set_temporary_query(self, query: str, display_name: str):
+        logger.info(f"[{self.chat_id}] 🎵 Установлен временный режим: '{display_name}'")
+        self.query = query
+        self.display_name = display_name
+        self.is_temporary_mode = True
+        self.playlist.clear()
         self.skip_event.set()
 
     async def _handle_forbidden(self):
@@ -189,11 +199,15 @@ class RadioSession:
                         await self.quiz_manager.start_quiz(self.chat_id, self.bot)
                         await asyncio.sleep(5)
                         continue
+                
+                time_for_rotation = time.time() - self.last_genre_change > 3600
+                too_many_failures = not self.is_temporary_mode and self.failed_downloads_count >= 5
 
-                if time.time() - self.last_genre_change > 3600 or self.failed_downloads_count >= 5:
-                    if self.failed_downloads_count >= 5:
+                if time_for_rotation or too_many_failures:
+                    if too_many_failures:
                         logger.warning(f"[{self.chat_id}] ⚠️ 5 неудачных скачиваний подряд. Принудительная смена жанра!")
                     
+                    self.is_temporary_mode = False
                     self.failed_downloads_count = 0 
                     
                     new_query, new_decade, new_display_name = get_random_catalog_query()
@@ -372,6 +386,20 @@ class RadioManager:
     def _get_lock(self, chat_id: int) -> asyncio.Lock:
         self._locks.setdefault(chat_id, asyncio.Lock())
         return self._locks[chat_id]
+
+    async def set_genre(self, chat_id: int, genre: str):
+        if session := self._sessions.get(chat_id):
+            if session.is_running:
+                await session.set_temporary_query(genre, f"жанр: {genre}")
+                return True
+        return False
+
+    async def set_artist(self, chat_id: int, artist: str):
+        if session := self._sessions.get(chat_id):
+            if session.is_running:
+                await session.set_temporary_query(artist, f"исполнитель: {artist}")
+                return True
+        return False
 
     async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
         async with self._get_lock(chat_id):

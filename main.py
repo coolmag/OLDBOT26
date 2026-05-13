@@ -34,6 +34,8 @@ async def lazy_startup_tasks(app: FastAPI):
     commands = [
         BotCommand("radio", "🎲 Случайная волна"),
         BotCommand("play", "🔎 Найти трек"),
+        BotCommand("artist", "🎤 Режим одного исполнителя"),
+        BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
         BotCommand("skip", "⏭ Следующий трек"),
         BotCommand("stop", "🛑 Остановить"),
         BotCommand("admin", "⚙️ Настройки"),
