@@ -25,8 +25,6 @@ GREETINGS = {
     "anime": ["Охайо, семпай! Аврора-тян готова ставить музыку! ✨", "Уиии! Давайте веселиться! 💖"],
     "joker": ["Слышали анекдот про басиста? Потом расскажу! 🎉", "Время шуток и хорошей музыки! 😂"],
     "news": ["В эфире экстренный выпуск новостей музыки. 📰", "Сводка новостей: вы подключились. 📡"],
-    
-    # 🔥 НОВЫЕ ПРИВЕТСТВИЯ
     "coach": ["Упал-отжался! Время качать уши! 💪", "На старт, внимание, марш! 🔥"],
     "nurse": ["Здравствуйте, на что жалуемся? Сейчас вылечим. 🩺", "Приготовьтесь, сейчас будет укол музыкой. 💉"],
     "diva": ["Я здесь, можете не аплодировать. 💅", "Дорогуши, этот эфир теперь официально роскошный. 💋"],
@@ -119,26 +117,21 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message_text = message.text
 
-    # 🎮 АБСОЛЮТНАЯ ИЗОЛЯЦИЯ ВИКТОРИНЫ (Через новый сервис!)
     quiz_manager = context.bot_data['quiz_manager']
     if quiz_manager.is_active(chat_id):
         if message_text.startswith('/'): return
         
-        # Передаем текст в сервис викторины
         is_correct = await quiz_manager.process_answer(chat_id, update.effective_user.id, update.effective_user.first_name, message_text, context.bot)
         
-        # 🔥 ФИЧА: Если юзер не угадал - кидаем дизлайк (реакцию)!
         if not is_correct:
             try: await message.set_reaction(reaction="👎")
             except: pass
         
-        # ⚠️ ЩИТ: Мы внутри викторины. Дальше текст не пускаем.
         return
 
-    # --- Стандартная обработка ---
     is_private = update.effective_chat.type == ChatType.PRIVATE
     is_reply = message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
-    is_mention = any(m in message_text.lower() for m in ["аврора", "aurora", "бот", "dj"])
+    is_mention = (not message_text.startswith('/')) and any(m in message_text.lower() for m in ["аврора", "aurora", "бот", "dj"])
 
     if is_private or is_reply or is_mention:
         await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
@@ -156,11 +149,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
     elif intent == 'chat': await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
 
-# 🔥 КОМАНДА ЗАПУСКА ИГРЫ "УГАДАЙ МЕЛОДИЮ"
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_mgr = context.bot_data['quiz_manager']
     import asyncio
-    # 🟢 Убрали передачу radio_mgr
     asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot)) 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,7 +159,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Что найти? Введите:\n`/play песня | ваше послание`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("""Что найти? Введите:
+`/play песня | ваше послание`""", parse_mode=ParseMode.MARKDOWN)
         return
     raw_query = " ".join(context.args)
     if "|" in raw_query:
@@ -190,11 +182,53 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await radio_manager.skip(update.effective_chat.id)
     await context.bot.send_message(update.effective_chat.id, "⏭ Переключаю трек...", disable_notification=True)
 
+async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Устанавливает временный жанр для радио."""
+    user_id = update.effective_user.id
+    settings = context.application.settings
+    
+    admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
+    admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
+    admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))
+    
+    if user_id not in admin_ids:
+        await update.message.reply_text("⛔️ Эта команда только для админов.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("""🤔 Укажите жанр. Например:
+`/set_genre 80s rock`""", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    genre = " ".join(context.args)
+    radio_manager = context.bot_data.get('radio_manager')
+    chat_type = update.effective_chat.type
+    
+    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre, chat_type):
+        await update.message.reply_text(f"✅ Окей, включаю волну по жанру: *{genre}*", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("❌ Произошла непредвиденная ошибка при установке жанра.")
+
+async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Включает треки указанного исполнителя."""
+    if not context.args:
+        await update.message.reply_text("""🤔 Укажите исполнителя. Например:
+`/artist Queen`""", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    artist = " ".join(context.args)
+    radio_manager = context.bot_data.get('radio_manager')
+    chat_type = update.effective_chat.type
+
+    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist, chat_type):
+        await update.message.reply_text(f"✅ Понял, сейчас будут только треки *{artist}*", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("❌ Произошла непредвиденная ошибка при включении артиста.")
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
     
-    # 🟢 БЕЗОПАСНАЯ ПРОВЕРКА АДМИНА
     admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
     admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
     admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))
@@ -202,7 +236,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_id in admin_ids
 
     if not is_admin:
-        await update.message.reply_text(f"⛔️ Вы не админ.\nВаш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"⛔️ Вы не админ. Ваш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
         return
 
     current_mode = await context.application.chat_manager.get_mode(update.effective_chat.id)
@@ -211,7 +245,6 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "default": "Эстет", "standup": "Комик", "expert": "Эксперт", 
         "gop": "Гопник", "toxic": "Токсик", "chill": "Чилл", 
         "cyberpunk": "Хакер 🌐", "anime": "Аниме 🌸", "joker": "Анекдоты 🤡", "news": "Новости 📰",
-        # 🔥 НОВЫЕ КНОПКИ ДЛЯ АДМИНКИ
         "coach": "Тренер 💪",
         "nurse": "Медсестра 🩺",
         "diva": "Дива 💅",
@@ -219,7 +252,6 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "teacher": "Училка 📚"
     }
     
-    # ⚠️ ЧТОБЫ КНОПОК НЕ БЫЛО СЛИШКОМ МНОГО В ОДИН РЯД, РАЗОБЬЕМ ИХ НА СЕТКУ ПО 2 В РЯД:
     buttons = [InlineKeyboardButton(f"{'✅ ' if mode == current_mode else ''}{mode_names.get(mode, mode)}", callback_data=f"set_mode|{mode}") for mode in PERSONAS.keys()]
     keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="close_admin")])
@@ -242,7 +274,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data.startswith("set_mode|"):
-        # 🟢 БЕЗОПАСНАЯ ПРОВЕРКА АДМИНА
         admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
         admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
         admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))

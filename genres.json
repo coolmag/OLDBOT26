@@ -1,52 +1,101 @@
 {
-  "sc_trends": {
-    "name": "🔥 Тренды SoundCloud",
+  "decades": {
+    "name": "📅 По Десятилетиям",
     "children": {
-      "phonk": { "name": "Phonk & Drift", "query": "#Phonk #Remix" },
-      "hyperpop": { "name": "Hyperpop", "query": "#Hyperpop #Glitchcore" },
-      "hardtechno": { "name": "Hard Techno", "query": "#HardTechno #Schranz" },
-      "latin": { "name": "Latin & Reggaeton", "query": "#Reggaeton #Afrobeats" }
+      "60s": { "name": "Classic 60s", "query": "60s classic rock pop hits" },
+      "70s": { "name": "Groovy 70s", "query": "70s disco funk rock" },
+      "80s": { "name": "Vibrant 80s", "query": "80s synth-pop new wave post-punk" },
+      "90s": { "name": "Alternative 90s", "query": "90s alternative rock grunge hip-hop" },
+      "00s": { "name": "Millennium 00s", "query": "00s pop-punk indie rock r&b" },
+      "10s": { "name": "Modern 10s", "query": "2010s edm pop indie hits" }
     }
   },
   "electronic": {
-    "name": "🎧 Electronic & EDM",
+    "name": "🎧 Electronic & Dance",
     "children": {
-      "techhouse": { "name": "Tech House", "query": "#TechHouse #Bootleg" },
-      "garage": { "name": "UK Garage", "query": "#Garage #Bassline" },
-      "edm": { "name": "EDM Mainstage", "query": "#EDM #Remix" }
+      "techhouse": { "name": "Tech House", "query": "#TechHouse #Minimal" },
+      "garage": { "name": "UK Garage & Bassline", "query": "#Garage #Bassline" },
+      "edm": { "name": "Big Room & EDM", "query": "#EDM #BigRoom #Festival" },
+      "trance": { "name": "Trance & Progressive", "query": "#Trance #ProgressiveTrance" },
+      "dnb": { "name": "Drum & Bass", "query": "#DnB #Jungle #LiquidDnB" },
+      "techno": { "name": "Techno (Peak Time)", "query": "#Techno #HardTechno" },
+      "downtempo": { "name": "Downtempo & IDM", "query": "#Downtempo #IDM #Ambient" },
+      "hardstyle": { "name": "Hardstyle & Gabber", "query": "#Hardstyle #Gabber" }
     }
   },
   "hiphop": {
     "name": "🎤 Hip-Hop & Rap",
     "children": {
-      "trap": { "name": "Dark Trap", "query": "#DarkTrap #Rap" },
-      "rnb": { "name": "R&B & Soul", "query": "#R&B #Soul" },
-      "underground": { "name": "Underground Rap", "query": "#Digicore #Hip-hop" }
+      "trap": { "name": "Modern Trap", "query": "#Trap #Rap" },
+      "rnb": { "name": "R&B & Neo-Soul", "query": "#R&B #Neo-Soul" },
+      "old_school": { "name": "Old School Hip-Hop", "query": "80s 90s #Hip-hop" },
+      "lofi_hiphop": { "name": "Lo-Fi Hip-Hop", "query": "#lofi hip hop beats to study to" },
+      "drill": { "name": "Drill (UK & US)", "query": "#Drill #UKDrill" }
     }
   },
   "rock": {
-    "name": "🎸 Rock & Alternative",
+    "name": "🎸 Rock & Metal",
     "children": {
-      "alt": { "name": "Alt Rock & Nu Metal", "query": "#AlternativeRock #NuMetal" },
-      "shoegaze": { "name": "Shoegaze", "query": "#Shoegaze #Indie" },
-      "classic": { "name": "Classic Rock", "query": "#Rock classic hits" }
+      "alt_rock": { "name": "Alternative Rock", "query": "#AlternativeRock" },
+      "nu_metal": { "name": "Nu Metal & Industrial", "query": "#NuMetal #Industrial" },
+      "shoegaze": { "name": "Shoegaze & Dream Pop", "query": "#Shoegaze #DreamPop" },
+      "classic_rock": { "name": "Classic Rock", "query": "#ClassicRock #HardRock" },
+      "post_punk": { "name": "Post-Punk & Goth", "query": "#PostPunk #GothicRock" },
+      "metalcore": { "name": "Metalcore & Deathcore", "query": "#Metalcore #Deathcore" },
+      "black_metal": { "name": "Black & Doom Metal", "query": "#BlackMetal #DoomMetal" }
+    }
+  },
+  "pop": {
+    "name": "🎤 Pop Music",
+    "children": {
+      "hyperpop": { "name": "Hyperpop & Glitchcore", "query": "#Hyperpop #Glitchcore" },
+      "synth_pop": { "name": "Synth-Pop", "query": "#Synthpop" },
+      "k_pop": { "name": "K-Pop", "query": "#KPOP" },
+      "indie_pop": { "name": "Indie Pop", "query": "#IndiePop" }
     }
   },
   "chill": {
     "name": "✨ Lo-Fi & Chill",
     "children": {
       "lofi": { "name": "Lo-Fi Beats", "query": "#Lo-fi #Chillhop" },
-      "ambient": { "name": "Ambient Space", "query": "#Ambient #DeepSleep" }
+      "ambient": { "name": "Ambient & Drone", "query": "#Ambient #Drone" },
+      "chillwave": { "name": "Chillwave & Vaporwave", "query": "#Chillwave #Vaporwave" }
+    }
+  },
+  "world": {
+    "name": "🌍 World Music",
+    "children": {
+      "reggae": { "name": "Reggae & Dub", "query": "#Reggae #Dub" },
+      "latin": { "name": "Latin & Reggaeton", "query": "#Reggaeton #Cumbia" },
+      "afrobeat": { "name": "Afrobeat & Highlife", "query": "#Afrobeat #Highlife" },
+      "balkan": { "name": "Balkan Beats", "query": "Balkan Beats Brass Band" }
+    }
+  },
+  "jazz_blues": {
+    "name": "🎷 Jazz & Blues",
+    "children": {
+      "classic_jazz": { "name": "Classic Jazz", "query": "classic jazz quartet" },
+      "blues": { "name": "Delta Blues", "query": "delta blues classics" },
+      "swing": { "name": "Electro Swing", "query": "#electroswing" }
     }
   },
   "russian": {
     "name": "🇷🇺 Наше Родное",
     "children": {
-      "ru_pop": { "name": "Русский Поп", "query": "русская попса хиты" },
-      "ru_rap": { "name": "Русский Рэп", "query": "русский рэп #Hip-hop" },
-      "ru_rock": { "name": "Русский Рок", "query": "русский рок легенды" },
-      "soviet": { "name": "Советский Грув", "query": "советский грув ретро" },
+      "ru_pop": { "name": "Русский Поп", "query": "русская поп-музыка хиты" },
+      "ru_rap": { "name": "Русский Рэп", "query": "русский рэп новое" },
+      "ru_rock": { "name": "Русский Рок", "query": "русский рок" },
+      "soviet": { "name": "Советский Грув", "query": "советская эстрада фанк" },
+      "ru_indie": { "name": "Русское Инди", "query": "русская инди-сцена" },
       "ru_remix": { "name": "Русские Ремиксы", "query": "русские хиты #Remix" }
+    }
+  },
+  "experimental": {
+    "name": "🧪 Experimental",
+    "children": {
+      "phonk": { "name": "Phonk & Drift", "query": "#Phonk #Drift" },
+      "breakcore": { "name": "Breakcore", "query": "#Breakcore #AmenBreak" },
+      "witch_house": { "name": "Witch House", "query": "#WitchHouse #Drag" }
     }
   }
 }
