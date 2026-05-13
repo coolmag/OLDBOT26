@@ -130,6 +130,15 @@ class RadioSession:
     async def skip(self):
         self.skip_event.set()
 
+    async def set_temporary_query(self, query: str, display_name: str):
+        """Временно устанавливает новый запрос (жанр/артист) до следующей плановой ротации."""
+        logger.info(f"[{self.chat_id}] 🎵 Установлен временный режим: '{display_name}'")
+        self.query = query
+        self.display_name = display_name
+        self.is_temporary_mode = True
+        self.playlist.clear()
+        self.skip_event.set() # Немедленно переключаемся
+
     async def _handle_forbidden(self):
         self.is_running = False
         self.skip_event.set()
@@ -410,25 +419,29 @@ class RadioManager:
         self._locks.setdefault(chat_id, asyncio.Lock())
         return self._locks[chat_id]
 
-    async def set_genre(self, chat_id: int, genre: str):
-        """Устанавливает временный жанр для чата."""
+    async def set_genre(self, chat_id: int, genre: str, chat_type: Optional[str] = None):
+        """Устанавливает временный жанр для чата. Если радио выключено - запускает его."""
         async with self._get_lock(chat_id):
             if session := self._sessions.get(chat_id):
                 if session.is_running:
                     await session.set_temporary_query(genre, f"жанр: {genre}")
                     return True
-        return False
+            # Если сессии нет или она неактивна, запускаем новую в этом режиме
+            await self.start(chat_id, query=genre, display_name=f"жанр: {genre}", chat_type=chat_type, is_temporary=True)
+            return True
 
-    async def set_artist(self, chat_id: int, artist: str):
-        """Включает режим проигрывания одного артиста."""
+    async def set_artist(self, chat_id: int, artist: str, chat_type: Optional[str] = None):
+        """Включает режим одного артиста. Если радио выключено - запускает его."""
         async with self._get_lock(chat_id):
             if session := self._sessions.get(chat_id):
                 if session.is_running:
                     await session.set_temporary_query(artist, f"исполнитель: {artist}")
                     return True
-        return False
+            # Если сессии нет или она неактивна, запускаем новую в этом режиме
+            await self.start(chat_id, query=artist, display_name=f"исполнитель: {artist}", chat_type=chat_type, is_temporary=True)
+            return True
 
-    async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
+    async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None, is_temporary: bool = False):
         async with self._get_lock(chat_id):
             if chat_id in self._sessions: await self._sessions[chat_id].stop()
             
@@ -450,6 +463,7 @@ class RadioManager:
                 decade=decade, 
                 chat_type=chat_type
             )
+            session.is_temporary_mode = is_temporary
             self._sessions[chat_id] = session
             await session.start()
 

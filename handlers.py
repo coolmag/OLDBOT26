@@ -210,27 +210,28 @@ async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     genre = " ".join(context.args)
     radio_manager = context.bot_data.get('radio_manager')
+    chat_type = update.effective_chat.type
     
-    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre):
-        await update.message.reply_text(f"✅ Окей, временно ставлю жанр: *{genre}*", parse_mode=ParseMode.MARKDOWN)
+    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre, chat_type):
+        await update.message.reply_text(f"✅ Окей, включаю волну по жанру: *{genre}*", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
+        await update.message.reply_text("❌ Произошла непредвиденная ошибка при установке жанра.")
 
 
 async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Включает треки указанного исполнителя."""
-    logger.info(f"ARTIST_COMMAND triggered by user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text("🤔 Укажите исполнителя. Например:\n`/artist Queen`", parse_mode=ParseMode.MARKDOWN)
         return
 
     artist = " ".join(context.args)
     radio_manager = context.bot_data.get('radio_manager')
+    chat_type = update.effective_chat.type
 
-    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist):
+    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist, chat_type):
         await update.message.reply_text(f"✅ Понял, сейчас будут только треки *{artist}*", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
+        await update.message.reply_text("❌ Произошла непредвиденная ошибка при включении артиста.")
 
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
