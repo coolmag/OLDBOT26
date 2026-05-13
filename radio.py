@@ -190,7 +190,7 @@ class RadioSession:
                     continue
 
                 # 🎮 АВТО-ВИКТОРИНА РАЗ В 15 МИНУТ
-                if time.time() - self.last_quiz_time > 900:
+                if time.time() - self.last_quiz_time > 3600:
                     self.last_quiz_time = time.time()
                     if self.quiz_manager:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
@@ -289,8 +289,8 @@ class RadioSession:
 
                 disable_cache = False # По умолчанию кэш работает
                 
-                # Делаем склейку, только если трек реально скачался на диск
-                if result and not result.is_url and result.file_path and Path(result.file_path).exists():
+                # Делаем склейку, только если трек реально скачался на диск и функция включена в конфиге
+                if self.settings.ENABLE_AI_DJ_INTRO and result and not result.is_url and result.file_path and Path(result.file_path).exists():
                     try:
                         topics = [
                             "смешную сплетню (можно выдуманную) про",
