@@ -159,8 +159,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Что найти? Введите:
-`/play песня | ваше послание`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("""Что найти? Введите:
+`/play песня | ваше послание`""", parse_mode=ParseMode.MARKDOWN)
         return
     raw_query = " ".join(context.args)
     if "|" in raw_query:
@@ -196,8 +196,8 @@ async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("🤔 Укажите жанр. Например:
-`/set_genre 80s rock`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("""🤔 Укажите жанр. Например:
+`/set_genre 80s rock`""", parse_mode=ParseMode.MARKDOWN)
         return
 
     genre = " ".join(context.args)
@@ -212,8 +212,8 @@ async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Включает треки указанного исполнителя."""
     if not context.args:
-        await update.message.reply_text("🤔 Укажите исполнителя. Например:
-`/artist Queen`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("""🤔 Укажите исполнителя. Например:
+`/artist Queen`""", parse_mode=ParseMode.MARKDOWN)
         return
 
     artist = " ".join(context.args)
@@ -236,8 +236,8 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_id in admin_ids
 
     if not is_admin:
-        await update.message.reply_text(f"⛔️ Вы не админ.
-Ваш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"""⛔️ Вы не админ.
+Ваш ID: `{user_id}`""", parse_mode=ParseMode.MARKDOWN)
         return
 
     current_mode = await context.application.chat_manager.get_mode(update.effective_chat.id)
