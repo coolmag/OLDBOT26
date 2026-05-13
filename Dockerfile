@@ -5,7 +5,7 @@ FROM python:3.11-slim
 # - ffmpeg: для обработки аудио/видео
 # - curl, unzip: для установки Deno
 # Deno: как JavaScript-рантайм для yt-dlp, чтобы избежать ошибок с YouTube
-RUN apt-get update && 
+RUN apt-get update && \
     apt-get install -y ffmpeg curl unzip && 
     apt-get clean && 
     rm -rf /var/lib/apt/lists/*
