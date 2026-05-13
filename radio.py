@@ -57,9 +57,9 @@ def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
-    return f"{icon} *{safe_title[:40].strip()}*
+    return f"""{icon} *{safe_title[:40].strip()}*
 👤 {safe_artist[:30].strip()}
-⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
+⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"""
 
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     all_queries = []
