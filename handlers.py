@@ -190,6 +190,48 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await radio_manager.skip(update.effective_chat.id)
     await context.bot.send_message(update.effective_chat.id, "⏭ Переключаю трек...", disable_notification=True)
 
+
+async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Устанавливает временный жанр для радио."""
+    user_id = update.effective_user.id
+    settings = context.application.settings
+    
+    admin_ids_str = getattr(settings, 'ADMIN_IDS', '')
+    admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
+    admin_ids.extend(getattr(settings, 'ADMIN_ID_LIST', []))
+    
+    if user_id not in admin_ids:
+        await update.message.reply_text("⛔️ Эта команда только для админов.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("🤔 Укажите жанр. Например:\n`/set_genre 80s rock`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    genre = " ".join(context.args)
+    radio_manager = context.bot_data.get('radio_manager')
+    
+    if radio_manager and await radio_manager.set_genre(update.effective_chat.id, genre):
+        await update.message.reply_text(f"✅ Окей, временно ставлю жанр: *{genre}*", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
+
+
+async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Включает треки указанного исполнителя."""
+    if not context.args:
+        await update.message.reply_text("🤔 Укажите исполнителя. Например:\n`/artist Queen`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    artist = " ".join(context.args)
+    radio_manager = context.bot_data.get('radio_manager')
+
+    if radio_manager and await radio_manager.set_artist(update.effective_chat.id, artist):
+        await update.message.reply_text(f"✅ Понял, сейчас будут только треки *{artist}*", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
+
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings

@@ -1,11 +1,19 @@
 # Берем легкий образ Linux с Python 3.11
 FROM python:3.11-slim
 
-# Устанавливаем системные пакеты: ffmpeg (для звука) и nodejs (для yt-dlp)
-RUN apt-get update && \
-    apt-get install -y ffmpeg nodejs && \
-    apt-get clean && \
+# Устанавливаем системные пакеты:
+# - ffmpeg: для обработки аудио/видео
+# - curl, unzip: для установки Deno
+# Deno: как JavaScript-рантайм для yt-dlp, чтобы избежать ошибок с YouTube
+RUN apt-get update && 
+    apt-get install -y ffmpeg curl unzip && 
+    apt-get clean && 
     rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Deno
+ENV DENO_INSTALL /root/.deno
+ENV PATH $DENO_INSTALL/bin:$PATH
+RUN curl -fsSL https://deno.land/x/install/install.sh | sh
 
 # Создаем рабочую папку
 WORKDIR /app

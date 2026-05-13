@@ -410,6 +410,24 @@ class RadioManager:
         self._locks.setdefault(chat_id, asyncio.Lock())
         return self._locks[chat_id]
 
+    async def set_genre(self, chat_id: int, genre: str):
+        """Устанавливает временный жанр для чата."""
+        async with self._get_lock(chat_id):
+            if session := self._sessions.get(chat_id):
+                if session.is_running:
+                    await session.set_temporary_query(genre, f"жанр: {genre}")
+                    return True
+        return False
+
+    async def set_artist(self, chat_id: int, artist: str):
+        """Включает режим проигрывания одного артиста."""
+        async with self._get_lock(chat_id):
+            if session := self._sessions.get(chat_id):
+                if session.is_running:
+                    await session.set_temporary_query(artist, f"исполнитель: {artist}")
+                    return True
+        return False
+
     async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
         async with self._get_lock(chat_id):
             if chat_id in self._sessions: await self._sessions[chat_id].stop()
