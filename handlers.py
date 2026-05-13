@@ -308,6 +308,8 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(CommandHandler("skip", skip_command))
+    app.add_handler(CommandHandler("set_genre", set_genre_command))
+    app.add_handler(CommandHandler("artist", artist_command))
     app.add_handler(CommandHandler("quiz", quiz_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
