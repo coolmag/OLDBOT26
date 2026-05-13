@@ -236,8 +236,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_id in admin_ids
 
     if not is_admin:
-        await update.message.reply_text(f"""⛔️ Вы не админ.
-Ваш ID: `{user_id}`""", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"⛔️ Вы не админ. Ваш ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
         return
 
     current_mode = await context.application.chat_manager.get_mode(update.effective_chat.id)
