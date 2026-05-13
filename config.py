@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     
     BOT_TOKEN: str 
+    TELEGRAM_SECRET: Optional[str] = None
     WEBHOOK_URL: str = ""
     BASE_URL: str = ""
     PLAYER_URL: str = ""
