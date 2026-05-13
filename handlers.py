@@ -138,7 +138,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Стандартная обработка ---
     is_private = update.effective_chat.type == ChatType.PRIVATE
     is_reply = message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
-    is_mention = any(m in message_text.lower() for m in ["аврора", "aurora", "бот", "dj"])
+    is_mention = (not message_text.startswith('/')) and any(m in message_text.lower() for m in ["аврора", "aurora", "бот", "dj"])
 
     if is_private or is_reply or is_mention:
         await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
