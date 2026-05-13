@@ -32,15 +32,14 @@ async def lazy_startup_tasks(app: FastAPI):
     tg_app = app.state.tg_app
     
     commands = [
-        BotCommand("radio", "🎲 Случайная волна"),
-        BotCommand("play", "🔎 Найти трек"),
-        BotCommand("artist", "🎤 Режим одного исполнителя"),
-        BotCommand("skip", "⏭ Следующий трек"),
-        BotCommand("stop", "🛑 Остановить"),
-        BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
+        BotCommand("radio", "🎲 Случайная волна"), 
+        BotCommand("play", "🔎 Найти трек"), 
+        BotCommand("skip", "⏭ Следующий трек"), 
+        BotCommand("stop", "🛑 Остановить"), 
         BotCommand("admin", "⚙️ Настройки"),
         BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
-    ]    
+    ]
+    
     connected = False
     attempt = 1
     while not connected:

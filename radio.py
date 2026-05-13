@@ -19,13 +19,16 @@ from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
 
+# Загрузка каталога жанров
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
     MUSIC_CATALOG = json.load(f)
 
+# ⚠️ ВОТ ЭТА СТРОКА БЫЛА ПОТЕРЯНА. ОНА КРИТИЧЕСКИ ВАЖНА ДЛЯ ЛОГОВ!
 logger = logging.getLogger(__name__)
 
 
 async def merge_audio(voice_path: str, track_path: str, output_path: str) -> bool:
+    """Аппаратная склейка голоса и трека через FFmpeg"""
     cmd = [
         'ffmpeg', '-y',
         '-i', voice_path,
@@ -57,7 +60,7 @@ def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     safe_title = str(track.title).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_artist = str(track.artist).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
-    return f"{icon} *{safe_title[:40].strip()}* | 👤 {safe_artist[:30].strip()} | ⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
+    return f"{icon} *{safe_title[:40].strip()}*\n👤 {safe_artist[:30].strip()}\n⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     all_queries = []
@@ -86,15 +89,14 @@ class RadioSession:
     downloader: YouTubeDownloader
     settings: Settings
     chat_manager: ChatManager
-    quiz_manager: QuizManager
-    radio_manager: 'RadioManager'
+    quiz_manager: QuizManager  #  injected
+    radio_manager: 'RadioManager' # injected
     query: str
     display_name: str
     chat_type: Optional[str] = None
     decade: Optional[str] = None
     
     is_running: bool = field(init=False, default=False)
-    is_temporary_mode: bool = field(init=False, default=False)
     playlist: List[TrackInfo] = field(default_factory=list)
     played_ids: Set[str] = field(default_factory=set)
     current_task: Optional[asyncio.Task] = field(init=False, default=None)
@@ -103,8 +105,9 @@ class RadioSession:
     _is_searching: bool = field(init=False, default=False)
     
     last_genre_change: float = field(init=False, default_factory=time.time)
-    failed_downloads_count: int = field(init=False, default=0)
+    failed_downloads_count: int = field(init=False, default=0) # ⚠️ СЧЕТЧИК ФЕЙЛОВ
     
+    # 🔥 ПАРАМЕТРЫ ДЛЯ ВИКТОРИНЫ
     quiz_active: bool = field(init=False, default=False)
     quiz_artist: str = field(init=False, default="")
     quiz_title: str = field(init=False, default="")
@@ -125,15 +128,6 @@ class RadioSession:
         logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
-        self.skip_event.set()
-
-    async def set_temporary_query(self, query: str, display_name: str):
-        """Временно устанавливает новый запрос (жанр/артист) до следующей плановой ротации."""
-        logger.info(f"[{self.chat_id}] 🎵 Установлен временный режим: '{display_name}'")
-        self.query = query
-        self.display_name = display_name
-        self.is_temporary_mode = True
-        self.playlist.clear()
         self.skip_event.set()
 
     async def _handle_forbidden(self):
@@ -177,6 +171,7 @@ class RadioSession:
                     found_new = True
                     break
             except Exception as e:
+                # 🟢 Теперь мы увидим, если YouTube отвалился по API лимитам
                 logger.warning(f"Failed to fetch tracks for query '{q}': {e}")
         
         if not found_new:
@@ -185,31 +180,39 @@ class RadioSession:
             else: self.played_ids.clear()
         self._is_searching = False
 
+
     async def _radio_loop(self):
         while self.is_running:
             try:
+                # 🟢 Теперь радио просто смотрит в QuizManager. Никакой магии с флагами!
                 if self.quiz_manager and self.quiz_manager.is_active(self.chat_id):
                     await asyncio.sleep(2)
                     continue
 
-                if time.time() - self.last_quiz_time > 3600:
+                # 🎮 АВТО-ВИКТОРИНА РАЗ В 15 МИНУТ
+                if time.time() - self.last_quiz_time > 900:
                     self.last_quiz_time = time.time()
                     if self.quiz_manager:
                         logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
+                        
+                        # 1. ЖДЕМ ЗАВЕРШЕНИЯ ВИКТОРИНЫ (await вместо create_task)
                         await self.quiz_manager.start_quiz(self.chat_id, self.bot)
+                        
+                        # 2. После викторины делаем небольшую паузу (5 сек), чтобы люди успели прочитать результаты
                         await asyncio.sleep(5)
+                        
+                        # 3. Идем на следующий круг (чтобы скачать новую музыку, а не ту, что пересеклась)
                         continue
 
-                time_for_rotation = time.time() - self.last_genre_change > 3600
-                too_many_failures = not self.is_temporary_mode and self.failed_downloads_count >= 5
-
-                if time_for_rotation or too_many_failures:
-                    if too_many_failures:
+                # 🔄 Ротация жанров (раз в час ИЛИ если слишком много фейлов скачивания)
+                if time.time() - self.last_genre_change > 3600 or self.failed_downloads_count >= 5:
+                    
+                    if self.failed_downloads_count >= 5:
                         logger.warning(f"[{self.chat_id}] ⚠️ 5 неудачных скачиваний подряд. Принудительная смена жанра!")
+                        self.failed_downloads_count = 0 
                     
-                    self.is_temporary_mode = False
-                    self.failed_downloads_count = 0 
-                    
+                    from radio import get_random_catalog_query 
+                    from ai_personas import PERSONAS 
                     new_query, new_decade, new_display_name = get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
@@ -223,19 +226,28 @@ class RadioSession:
                     announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
                     if announcement:
                         try:
+                            # 1. Очищаем текст от эмодзи (чтобы Аврора не читала вслух "смайлик огонь")
                             clean_text = re.sub(r'[^\w\s\.,!?\-а-яА-ЯёЁa-zA-Z]', '', announcement).strip()
+                            
+                            # 2. Путь для сохранения голосового сообщения
                             voice_path = self.settings.DOWNLOADS_DIR / f"dj_voice_{self.chat_id}_{int(time.time())}.ogg"
+                            
+                            # 3. Генерируем голос! 
+                            # ru-RU-SvetlanaNeural - женский приятный голос. rate="+10%" - чуть бодрее.
                             communicate = edge_tts.Communicate(clean_text, "ru-RU-SvetlanaNeural", rate="+10%")
                             await communicate.save(str(voice_path))
                             
+                            # 4. Отправляем как настоящее голосовое сообщение (войс)
                             if voice_path.exists():
                                 with open(voice_path, 'rb') as f:
                                     await self.bot.send_voice(self.chat_id, voice=f)
-                                os.unlink(voice_path)
+                                os.unlink(voice_path) # Удаляем файл сразу после отправки
                             else:
                                 raise FileNotFoundError("Voice file not created")
+                                
                         except Exception as e:
                             logger.error(f"Voice generation failed: {e}")
+                            # План Б: Если генерация голоса сломалась, просто шлем текстом
                             await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
                     await asyncio.sleep(2)
 
@@ -275,9 +287,10 @@ class RadioSession:
                 self.played_ids.add(track.identifier)
                 if len(self.played_ids) > 500: self.played_ids = set(list(self.played_ids)[250:])
 
-                disable_cache = False
+                disable_cache = False # По умолчанию кэш работает
                 
-                if self.settings.ENABLE_AI_DJ_INTRO and result and not result.is_url and result.file_path and Path(result.file_path).exists():
+                # Делаем склейку, только если трек реально скачался на диск
+                if result and not result.is_url and result.file_path and Path(result.file_path).exists():
                     try:
                         topics = [
                             "смешную сплетню (можно выдуманную) про",
@@ -290,24 +303,31 @@ class RadioSession:
                         
                         announcement = await self.chat_manager.get_response(self.chat_id, prompt, "System")
                         if announcement:
+                            # 1. Очищаем текст
                             clean_text = re.sub(r'[^\w\s\.,!?\-а-яА-ЯёЁa-zA-Z]', '', announcement).strip()
+                            
+                            # 2. Пути для файлов
                             voice_path = str(self.settings.DOWNLOADS_DIR / f"voice_{self.chat_id}.mp3")
                             merged_path = str(self.settings.DOWNLOADS_DIR / f"merged_{track.identifier}_{int(time.time())}.mp3")
                             
+                            # 3. Генерируем голос
                             communicate = edge_tts.Communicate(clean_text, "ru-RU-SvetlanaNeural", rate="+10%")
                             await communicate.save(voice_path)
                             
+                            # 4. СПАИВАЕМ ФАЙЛЫ!
                             if os.path.exists(voice_path):
                                 is_merged = await merge_audio(voice_path, str(result.file_path), merged_path)
                                 if is_merged:
+                                    # Подменяем оригинальный трек на наш склеенный микс
                                     result.file_path = merged_path
-                                    disable_cache = True
+                                    disable_cache = True # 🟢 ЗАПРЕЩАЕМ КЭШИРОВАТЬ ЭТОТ УНИКАЛЬНЫЙ МИКС!
                                 
                                 try: os.unlink(voice_path)
                                 except: pass
                     except Exception as e:
                         logger.error(f"DJ Intro merge error: {e}")
 
+                # Передаем флаг disable_cache в отправку
                 success = await self._send_track(track, result, disable_cache=disable_cache)
                 
                 if success:
@@ -340,6 +360,7 @@ class RadioSession:
                 await self._delete_status()
                 return True
 
+            # 🟢 Проверяем кэш только если он не запрещен (нет уникальной подводки)
             if not disable_cache:
                 cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
                 if cached_file_id:
@@ -352,6 +373,7 @@ class RadioSession:
 
             if audio_source and Path(audio_source).exists():
                 with open(audio_source, 'rb') as f:
+                    # 🟢 Явно прописываем title и performer, чтобы скрыть склейку от пользователя
                     msg = await self.bot.send_audio(
                         self.chat_id, 
                         audio=f, 
@@ -363,6 +385,7 @@ class RadioSession:
                         read_timeout=120, 
                         write_timeout=120
                     )
+                    # Сохраняем в кэш только "чистые" треки без подводки
                     if msg.audio and not disable_cache: 
                         await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 
@@ -387,27 +410,7 @@ class RadioManager:
         self._locks.setdefault(chat_id, asyncio.Lock())
         return self._locks[chat_id]
 
-    async def set_genre(self, chat_id: int, genre: str, chat_type: Optional[str] = None):
-        """Устанавливает временный жанр для чата. Если радио выключено - запускает его."""
-        async with self._get_lock(chat_id):
-            if session := self._sessions.get(chat_id):
-                if session.is_running:
-                    await session.set_temporary_query(genre, f"жанр: {genre}")
-                    return True
-            await self.start(chat_id, query=genre, display_name=f"жанр: {genre}", chat_type=chat_type, is_temporary=True)
-            return True
-
-    async def set_artist(self, chat_id: int, artist: str, chat_type: Optional[str] = None):
-        """Включает режим одного артиста. Если радио выключено - запускает его."""
-        async with self._get_lock(chat_id):
-            if session := self._sessions.get(chat_id):
-                if session.is_running:
-                    await session.set_temporary_query(artist, f"исполнитель: {artist}")
-                    return True
-            await self.start(chat_id, query=artist, display_name=f"исполнитель: {artist}", chat_type=chat_type, is_temporary=True)
-            return True
-
-    async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None, is_temporary: bool = False):
+    async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
         async with self._get_lock(chat_id):
             if chat_id in self._sessions: await self._sessions[chat_id].stop()
             
@@ -429,7 +432,6 @@ class RadioManager:
                 decade=decade, 
                 chat_type=chat_type
             )
-            session.is_temporary_mode = is_temporary
             self._sessions[chat_id] = session
             await session.start()
 
