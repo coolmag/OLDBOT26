@@ -219,6 +219,7 @@ async def set_genre_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Включает треки указанного исполнителя."""
+    logger.info(f"ARTIST_COMMAND triggered by user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text("🤔 Укажите исполнителя. Например:\n`/artist Queen`", parse_mode=ParseMode.MARKDOWN)
         return
