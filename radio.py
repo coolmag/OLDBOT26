@@ -403,12 +403,20 @@ class RadioManager:
 
     async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
         async with self._get_lock(chat_id):
-            if chat_id in self._sessions: await self._sessions[chat_id].stop()
+            if chat_id in self._sessions:
+                await self._sessions[chat_id].stop()
             
+            # 🟢 Логика выбора случайного жанра при старте
+            final_query = query
+            final_display_name = display_name or query
+            final_decade = decade
+
             if query == "random": 
-                query, random_decade, random_display_name = get_random_catalog_query()
-                if not decade: decade = random_decade
-                if not display_name: display_name = random_display_name
+                random_query, random_decade, random_display_name = get_random_catalog_query()
+                final_query = random_query
+                final_display_name = random_display_name # 🟢 Используем имя реального жанра
+                if not final_decade: 
+                    final_decade = random_decade
 
             session = RadioSession(
                 chat_id=chat_id, 
@@ -418,9 +426,9 @@ class RadioManager:
                 chat_manager=self._chat_manager,
                 quiz_manager=self._quiz_manager,
                 radio_manager=self,
-                query=query, 
-                display_name=(display_name or query), 
-                decade=decade, 
+                query=final_query, 
+                display_name=final_display_name,
+                decade=final_decade, 
                 chat_type=chat_type
             )
             self._sessions[chat_id] = session

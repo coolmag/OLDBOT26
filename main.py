@@ -25,100 +25,73 @@ from handlers import setup_handlers
 
 logger = logging.getLogger("main")
 
-# ⚠️ ВСЕ ТЯЖЕЛЫЕ ПРОЦЕССЫ ВЫНЕСЕНЫ В ФОН
-async def lazy_startup_tasks(app: FastAPI):
-    logger.info("⏳ Ленивая инициализация сервисов в фоне...")
+# 🟢 Новая фоновая задача ТОЛЬКО для очистки и поллинга (если нет вебхука)
+async def background_tasks(app: FastAPI):
+    logger.info("⏳ Запуск фоновых задач (Сборщик мусора & Polling-fallback)...")
     settings = app.state.settings
     tg_app = app.state.tg_app
-    
-    commands = [
-        BotCommand("radio", "🎲 Случайная волна"),
-        BotCommand("play", "🔎 Найти трек"),
-        BotCommand("artist", "🎤 Режим одного исполнителя"),
-        BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
-        BotCommand("skip", "⏭ Следующий трек"),
-        BotCommand("stop", "🛑 Остановить"),
-        BotCommand("admin", "⚙️ Настройки"),
-        BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
-    ]    
-    connected = False
-    attempt = 1
-    while not connected:
-        try:
-            await tg_app.bot.set_my_commands(commands)
-            await tg_app.initialize()
-            await tg_app.start()
-            
-            if settings.WEBHOOK_URL:
-                await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL)
-                logger.info(f"🔗 Webhook set to: {settings.WEBHOOK_URL}")
-            else:
-                # 🟢 ЕСЛИ НЕТ ВЕБХУКА - ЗАПУСКАЕМ ОПРОС (POLLING)
-                if tg_app.updater:
-                    await tg_app.updater.start_polling()
-                    logger.info("📡 Webhook URL not found. Started Long Polling!")
-            
-            connected = True
-            logger.info("🚀 Бот успешно подключен к Telegram API!")
-        except Exception as e:
-            logger.warning(f"⚠️ Сеть недоступна (Попытка {attempt}). Ждем 5 сек... Ошибка: {e}")
-            attempt += 1
-            await asyncio.sleep(5)
 
-    # 🟢 Обновленный сборщик мусора
+    # Запускаем polling только если не используется вебхук
+    if not settings.WEBHOOK_URL:
+        # Эти два вызова нужны для запуска встроенного поллинга
+        await tg_app.start()
+        if tg_app.updater:
+            await tg_app.updater.start_polling()
+            logger.info("📡 Webhook URL не найден. Запущен Long Polling!")
+
+    # Бесконечный цикл сборщика мусора
     downloads_dir = settings.DOWNLOADS_DIR
     while True:
         try:
             now = time.time()
-            # Проверяем все временные расширения
-            for ext in ("*.mp3", "*.mp4", "*.ogg"): 
+            for ext in ("*.mp3", "*.mp4", "*.ogg"):
                 for file_path in downloads_dir.glob(ext):
-                    # Если файлу больше часа (3600 сек) - удаляем
-                    if file_path.is_file() and now - file_path.stat().st_mtime > 3600:
+                    if file_path.is_file() and now - file_path.stat().st_mtime > 3600: # 1 час
                         try:
                             file_path.unlink()
                             logger.debug(f"🗑 Сборщик мусора удалил: {file_path.name}")
-                        except Exception as e: pass
+                        except OSError: # Файл может быть занят
+                            pass
         except Exception as e:
-            logger.error(f"Cleanup task error: {e}")
-        await asyncio.sleep(600)
+            logger.error(f"Ошибка в работе сборщика мусора: {e}")
+        await asyncio.sleep(600) # Проверять каждые 10 минут
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ------------------ 1. Инициализация всех базовых сервисов ------------------
     setup_logging()
     settings = get_settings()
     app.state.settings = settings
-    
-    logger.info("⚡ System Starting Up (Railway Docker Edition)...")
-    if shutil.which("ffmpeg"): logger.info("✅ FFmpeg detected.")
-    else: logger.warning("⚠️ FFmpeg not found!")
+
+    logger.info("⚡ Система запускается (v3.6 STABLE)...")
+    if shutil.which("ffmpeg"): logger.info("✅ FFmpeg обнаружен.")
+    else: logger.warning("⚠️ FFmpeg не найден в системе! Загрузка невозможна.")
 
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
-    
+
     ai_manager = AIManager(settings)
-    chat_manager = ChatManager(ai_manager, cache) # 🟢 Передали cache
+    chat_manager = ChatManager(ai_manager, cache)
     downloader = YouTubeDownloader(settings, cache)
-    
+
+    # ------------------ 2. Создание и настройка Telegram App ------------------
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
     tg_app = builder.build()
-    
-    # Сначала викторина, потом радио, чтобы передать зависимость
-    quiz_manager = QuizManager(settings, downloader, chat_manager, cache) # 🟢 Передали cache
+
+    quiz_manager = QuizManager(settings, downloader, chat_manager, cache)
     radio_manager = RadioManager(
-        bot=tg_app.bot, 
-        settings=settings, 
-        downloader=downloader, 
+        bot=tg_app.bot,
+        settings=settings,
+        downloader=downloader,
         chat_manager=chat_manager,
-        quiz_manager=quiz_manager # Внедряем зависимость
+        quiz_manager=quiz_manager
     )
-    
-    # ⚠️ ИСПРАВЛЕНИЕ: Храним менеджеры в bot_data (официальный путь), а не в самом боте!
+
     tg_app.bot_data['radio_manager'] = radio_manager
     tg_app.bot_data['quiz_manager'] = quiz_manager
     
-    # Привязываем к application, чтобы хендлеры могли их достать
+    # Связываем менеджеры с приложением для доступа в хендлерах
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
@@ -127,20 +100,55 @@ async def lifespan(app: FastAPI):
     
     setup_handlers(tg_app)
     
+    # ------------------ 3. КРИТИЧЕСКАЯ СИНХРОНИЗАЦИЯ ПЕРЕД СТАРТОМ ------------------
+    # Эти вызовы должны завершиться ДО того, как сервер начнет принимать запросы
+    connected = False
+    attempt = 1
+    while not connected:
+        try:
+            logger.info(f"🔌 Попытка подключения к Telegram (Попытка {attempt})...")
+            await tg_app.initialize() # <--- САМЫЙ ВАЖНЫЙ ШАГ
+
+            commands = [
+                BotCommand("radio", "🎲 Случайная волна"),
+                BotCommand("play", "🔎 Найти трек"),
+                BotCommand("artist", "🎤 Режим одного исполнителя"),
+                BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
+                BotCommand("skip", "⏭ Следующий трек"),
+                BotCommand("stop", "🛑 Остановить"),
+                BotCommand("admin", "⚙️ Настройки"),
+                BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
+            ]
+            await tg_app.bot.set_my_commands(commands)
+
+            if settings.WEBHOOK_URL:
+                await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL, allowed_updates=Update.ALL_TYPES)
+                logger.info(f"🔗 Вебхук успешно установлен: {settings.WEBHOOK_URL}")
+            
+            connected = True
+            logger.info("🚀 Бот полностью инициализирован и готов к работе!")
+        except Exception as e:
+            logger.error(f"⚠️ Критическая ошибка при инициализации Telegram: {e}", exc_info=True)
+            logger.info(f"🔁 Повторная попытка через 10 секунд...")
+            attempt += 1
+            await asyncio.sleep(10)
+
+    # ------------------ 4. Передача состояния и запуск фоновых задач ------------------
     app.state.tg_app = tg_app
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
-    
-    startup_task = asyncio.create_task(lazy_startup_tasks(app))
-    
-    yield
-    
-    logger.info("🔻 System Shutting Down...")
-    startup_task.cancel()
+
+    # Запускаем некритичные задачи (сборщик мусора, поллинг) в фоне
+    background_task = asyncio.create_task(background_tasks(app))
+
+    yield # <--- СЕРВЕР ЗАПУСКАЕТСЯ ТОЛЬКО ЗДЕСЬ
+
+    # ------------------ 5. Корректное завершение работы ------------------
+    logger.info("🔻 Система останавливается...")
+    background_task.cancel()
     await radio_manager.stop_all()
-    # 🟢 Останавливаем updater (polling), если он работал
     if tg_app.updater and tg_app.updater.running:
-        await tg_app.updater.stop() 
+        await tg_app.updater.stop()
     await tg_app.stop()
     await tg_app.shutdown()
     await cache.close()
@@ -148,6 +156,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.get("/api/health")

@@ -75,12 +75,19 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
-async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE):
-    effective_query = query or "случайные популярные треки"
-    await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{effective_query}*", parse_mode=ParseMode.MARKDOWN)
+async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, chat_type: str | None = None):
+    # 🟢 Если запрос пустой, используем ключевое слово "random", чтобы RadioManager сам выбрал жанр
+    effective_query = query or "random"
+    
+    # 🟢 Отображаем общее сообщение, пока выбирается жанр
+    display_name = query if query else "Случайная волна"
+    await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{display_name}*", parse_mode=ParseMode.MARKDOWN)
+    
     radio_manager = context.bot_data['radio_manager']
     import asyncio
-    asyncio.create_task(radio_manager.start(chat_id, effective_query))
+    
+    # 🟢 Передаем chat_type в менеджер
+    asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=chat_type, display_name=display_name))
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -146,7 +153,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             q, d = query.split("|", 1)
             await _do_play(chat_id, q.strip(), context, dedication=d.strip())
         else: await _do_play(chat_id, query, context)
-    elif intent == 'radio' and query: await _do_radio(chat_id, query, context)
+    elif intent == 'radio' and query: await _do_radio(chat_id, query, context, chat_type=update.effective_chat.type)
     elif intent == 'chat': await _do_chat_reply(chat_id, message_text, update.effective_user.first_name, context)
 
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,7 +176,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _do_play(update.effective_chat.id, raw_query, context)
 
 async def radio_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _do_radio(update.effective_chat.id, " ".join(context.args), context)
+    await _do_radio(update.effective_chat.id, " ".join(context.args), context, chat_type=update.effective_chat.type)
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     radio_manager = context.bot_data['radio_manager']
