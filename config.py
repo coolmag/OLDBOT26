@@ -41,12 +41,16 @@ class Settings(BaseSettings):
     ADMIN_ID_LIST: List[int] = []
     
     BASE_DIR: Path = Path(__file__).resolve().parent
-    DOWNLOADS_DIR: Path = BASE_DIR / "downloads"
-    TEMP_AUDIO_DIR: Path = BASE_DIR / "temp_audio"
-    CACHE_DB_PATH: Path = BASE_DIR / "cache.db"
-    COOKIES_FILE: Path = BASE_DIR / "cookies.txt"
-    PROXIES_FILE: Path = BASE_DIR / "working_proxies.txt"
-    V2RAY_PROXIES_FILE: Path = BASE_DIR / "hiddify_compatible_v2ray_proxies.txt"
+
+    # Определяем базовую директорию для записи. На Vercel это /tmp.
+    WRITABLE_DIR: Path = Path("/tmp") if os.getenv("VERCEL") == "1" else BASE_DIR
+
+    DOWNLOADS_DIR: Path = WRITABLE_DIR / "downloads"
+    TEMP_AUDIO_DIR: Path = WRITABLE_DIR / "temp_audio"
+    CACHE_DB_PATH: Path = WRITABLE_DIR / "cache.db"
+    COOKIES_FILE: Path = WRITABLE_DIR / "cookies.txt"
+    PROXIES_FILE: Path = WRITABLE_DIR / "working_proxies.txt"
+    V2RAY_PROXIES_FILE: Path = WRITABLE_DIR / "hiddify_compatible_v2ray_proxies.txt"
     
     LOG_LEVEL: str = "INFO"
     MAX_CONCURRENT_DOWNLOADS: int = 3

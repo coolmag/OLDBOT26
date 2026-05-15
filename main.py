@@ -102,36 +102,31 @@ async def lifespan(app: FastAPI):
     
     # ------------------ 3. КРИТИЧЕСКАЯ СИНХРОНИЗАЦИЯ ПЕРЕД СТАРТОМ ------------------
     # Эти вызовы должны завершиться ДО того, как сервер начнет принимать запросы
-    connected = False
-    attempt = 1
-    while not connected:
-        try:
-            logger.info(f"🔌 Попытка подключения к Telegram (Попытка {attempt})...")
-            await tg_app.initialize() # <--- САМЫЙ ВАЖНЫЙ ШАГ
+    try:
+        logger.info("🔌 Попытка подключения к Telegram...")
+        await tg_app.initialize() # <--- САМЫЙ ВАЖНЫЙ ШАГ
 
-            commands = [
-                BotCommand("radio", "🎲 Случайная волна"),
-                BotCommand("play", "🔎 Найти трек"),
-                BotCommand("artist", "🎤 Режим одного исполнителя"),
-                BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
-                BotCommand("skip", "⏭ Следующий трек"),
-                BotCommand("stop", "🛑 Остановить"),
-                BotCommand("admin", "⚙️ Настройки"),
-                BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
-            ]
-            await tg_app.bot.set_my_commands(commands)
+        commands = [
+            BotCommand("radio", "🎲 Случайная волна"),
+            BotCommand("play", "🔎 Найти трек"),
+            BotCommand("artist", "🎤 Режим одного исполнителя"),
+            BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
+            BotCommand("skip", "⏭ Следующий трек"),
+            BotCommand("stop", "🛑 Остановить"),
+            BotCommand("admin", "⚙️ Настройки"),
+            BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
+        ]
+        await tg_app.bot.set_my_commands(commands)
 
-            if settings.WEBHOOK_URL:
-                await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL, allowed_updates=Update.ALL_TYPES)
-                logger.info(f"🔗 Вебхук успешно установлен: {settings.WEBHOOK_URL}")
-            
-            connected = True
-            logger.info("🚀 Бот полностью инициализирован и готов к работе!")
-        except Exception as e:
-            logger.error(f"⚠️ Критическая ошибка при инициализации Telegram: {e}", exc_info=True)
-            logger.info(f"🔁 Повторная попытка через 10 секунд...")
-            attempt += 1
-            await asyncio.sleep(10)
+        if settings.WEBHOOK_URL:
+            await tg_app.bot.set_webhook(url=settings.WEBHOOK_URL, allowed_updates=Update.ALL_TYPES)
+            logger.info(f"🔗 Вебхук успешно установлен: {settings.WEBHOOK_URL}")
+        
+        logger.info("🚀 Бот полностью инициализирован и готов к работе!")
+    except Exception as e:
+        logger.error(f"⚠️ Критическая ошибка при инициализации Telegram: {e}", exc_info=True)
+        # Перевыбрасываем исключение, чтобы Vercel точно показал сбой
+        raise
 
     # ------------------ 4. Передача состояния и запуск фоновых задач ------------------
     app.state.tg_app = tg_app
