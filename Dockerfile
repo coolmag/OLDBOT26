@@ -1,29 +1,28 @@
-# Берем легкий образ Linux с Python 3.11
+# Этап 1: Базовый образ с Python
 FROM python:3.11-slim
 
-# Устанавливаем системные пакеты:
-# - ffmpeg: для обработки аудио/видео
-# - curl, unzip: для установки Deno
-# Deno: как JavaScript-рантайм для yt-dlp, чтобы избежать ошибок с YouTube
-RUN apt-get update && \
-    apt-get install -y ffmpeg curl unzip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Устанавливаем Deno
-ENV DENO_INSTALL /root/.deno
-ENV PATH $DENO_INSTALL/bin:$PATH
-RUN curl -fsSL https://deno.land/x/install/install.sh | sh
-
-# Создаем рабочую папку
+# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Копируем список библиотек и устанавливаем их
+# Обновляем список пакетов и устанавливаем FFmpeg
+# RUN apt-get update говорит системе обновить список доступных пакетов
+# RUN apt-get install -y ffmpeg устанавливает сам FFmpeg. Ключ -y автоматически отвечает "да" на все запросы.
+RUN apt-get update && apt-get install -y ffmpeg
+
+# Копируем файл с зависимостями в контейнер
 COPY requirements.txt .
+
+# Устанавливаем зависимости
+# Мы используем --no-cache-dir, чтобы не хранить лишние файлы и уменьшить размер образа
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь остальной код проекта
+# Копируем весь остальной код проекта в контейнер
 COPY . .
 
-# Запускаем FastAPI сервер (Railway сам пробросит порт)
+# Открываем порт, на котором будет работать бот. 
+# Yandex Serverless Containers ожидают, что приложение будет слушать порт 8080.
+EXPOSE 8080
+
+# Команда для запуска приложения при старте контейнера
+# Запускаем uvicorn, чтобы он слушал все входящие подключения на порту 8080
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

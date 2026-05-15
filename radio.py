@@ -160,6 +160,44 @@ class RadioSession:
     async def _fill_playlist(self, retry_query: str = None):
         if self._is_searching or not self.is_running: return
         self._is_searching = True
+
+        # START of new playlist logic
+        genre_node = None
+        for category in MUSIC_CATALOG.values():
+            for key, genre in category.get("children", {}).items():
+                if genre.get("name") == self.display_name:
+                    genre_node = genre
+                    break
+            if genre_node:
+                break
+        
+        if genre_node and "tracks" in genre_node:
+            logger.info(f"[{self.chat_id}] 🎶 Filling playlist from static list: {self.display_name}")
+            
+            # Берем случайные 15 треков из списка, если он большой, или все, если маленький
+            sample_size = min(15, len(genre_node["tracks"]))
+            track_names_to_search = random.sample(genre_node["tracks"], sample_size)
+            
+            found_tracks = []
+            for track_name in track_names_to_search:
+                try:
+                    # Ищем каждый трек отдельно, чтобы получить TrackInfo
+                    search_results = await self.downloader.search(track_name, limit=1)
+                    if search_results:
+                        track_info = search_results[0]
+                        if track_info.identifier not in self.played_ids:
+                            found_tracks.append(track_info)
+                except Exception as e:
+                    logger.warning(f"Failed to search for static track '{track_name}': {e}")
+            
+            if found_tracks:
+                random.shuffle(found_tracks)
+                self.playlist.extend(found_tracks)
+            
+            self._is_searching = False
+            return
+        # END of new playlist logic
+
         base_query = retry_query or self.query
         variations = [base_query, f"{base_query} mix", f"{base_query} hits", f"best of {base_query}"]
         if random.random() > 0.5: variations.append(f"{base_query} 2024")

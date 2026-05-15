@@ -2,6 +2,8 @@ from __future__ import annotations
 import logging
 import random
 import re
+import json
+from pathlib import Path
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
@@ -13,6 +15,13 @@ from telegram.ext import (
 from ai_personas import PERSONAS
 
 logger = logging.getLogger("handlers")
+
+# Load genres data for /toprock command
+try:
+    with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
+        GENRES_DATA = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    GENRES_DATA = {}
 
 GREETINGS = {
     "default": ["Привет! Я снова я. 🎧", "Режим по умолчанию. Погнали!"],
@@ -75,19 +84,18 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
     else:
         await msg.edit_text("😕 Ничего не найдено по этому запросу.")
 
-async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, chat_type: str | None = None):
-    # 🟢 Если запрос пустой, используем ключевое слово "random", чтобы RadioManager сам выбрал жанр
+async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, chat_type: str | None = None, display_name: Optional[str] = None):
     effective_query = query or "random"
     
-    # 🟢 Отображаем общее сообщение, пока выбирается жанр
-    display_name = query if query else "Случайная волна"
-    await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{display_name}*", parse_mode=ParseMode.MARKDOWN)
+    # Use the provided display_name or default to the query
+    final_display_name = display_name or (query if query else "Случайная волна")
+    await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{final_display_name}*", parse_mode=ParseMode.MARKDOWN)
     
     radio_manager = context.bot_data['radio_manager']
     import asyncio
     
-    # 🟢 Передаем chat_type в менеджер
-    asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=chat_type, display_name=display_name))
+    # Pass all relevant info to the manager
+    asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=chat_type, display_name=final_display_name))
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -225,6 +233,56 @@ async def artist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🤔 Радио не запущено. Сначала включите его командой `/radio`.")
 
+async def rockdance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the special RockDance playlist."""
+    radio_manager = context.bot_data['radio_manager']
+    chat_id = update.effective_chat.id
+    await update.message.reply_text("🎸🥁 Запускаю спец-плейлист 'RockDance'!")
+    
+    # Use a unique query to identify the playlist mode, and the display_name must match genres.json
+    await _do_radio(
+        chat_id=chat_id,
+        query="playlist:rockdance",
+        context=context,
+        display_name="RockDance",
+        chat_type=update.effective_chat.type
+    )
+
+async def toprock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Plays a random artist from the RockDance playlist."""
+    try:
+        if not GENRES_DATA:
+            await update.message.reply_text("❌ Ошибка: файл жанров не загружен.")
+            return
+
+        rockdance_tracks = GENRES_DATA.get("playlists", {}).get("children", {}).get("rockdance", {}).get("tracks", [])
+        if not rockdance_tracks:
+            await update.message.reply_text("❌ Ошибка: плейлист 'RockDance' не найден или пуст.")
+            return
+
+        artists = {track.split('–')[0].strip() for track in rockdance_tracks}
+        
+        if not artists:
+            await update.message.reply_text("Не удалось найти артистов в плейлисте RockDance.")
+            return
+
+        random_artist = random.choice(list(artists))
+        
+        await update.message.reply_text(f"🎸 Включаю случайную волну по исполнителю из 'Top Rock': *{random_artist}*", parse_mode=ParseMode.MARKDOWN)
+        
+        # Re-use the existing _do_radio helper function
+        await _do_radio(
+            chat_id=update.effective_chat.id,
+            query=random_artist,
+            context=context,
+            display_name=f"Исполнитель: {random_artist}",
+            chat_type=update.effective_chat.type
+        )
+
+    except Exception as e:
+        logger.error(f"Toprock command error: {e}", exc_info=True)
+        await update.message.reply_text("❌ Произошла ошибка при запуске /toprock.")
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = context.application.settings
@@ -299,6 +357,8 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("set_genre", set_genre_command))
     app.add_handler(CommandHandler("artist", artist_command))
     app.add_handler(CommandHandler("quiz", quiz_command))
+    app.add_handler(CommandHandler("rockdance", rockdance_command))
+    app.add_handler(CommandHandler("toprock", toprock_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))
