@@ -347,6 +347,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(update.effective_chat.id, greeting)
         await query.delete_message()
 
+async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Runs a diagnostic test on AI providers."""
+    await update.message.reply_text("🤖 Запускаю диагностику AI-провайдеров...")
+    ai_manager = context.application.ai_manager
+    report = await ai_manager.test_providers()
+    await update.message.reply_text(report, parse_mode=ParseMode.MARKDOWN)
+
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("play", play_command))
@@ -359,6 +366,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("quiz", quiz_command))
     app.add_handler(CommandHandler("rockdance", rockdance_command))
     app.add_handler(CommandHandler("toprock", toprock_command))
+    app.add_handler(CommandHandler("test_ai", test_ai_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from telegram import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from config import Settings
 from models import TrackInfo, DownloadResult

@@ -171,6 +171,44 @@ class AIManager:
             logger.error(f"OpenRouter call failed: {e}")
         return None
 
+    async def test_providers(self) -> str:
+        report = ["🤖 **AI Providers Status Check:**"]
+
+        # --- Test Google AI ---
+        if "GoogleAI" in self.providers:
+            try:
+                # A simple, non-intensive query to a reliable model
+                response = self.gemini_client.models.generate_content("test", config=types.GenerateContentConfig(temperature=0.1))
+                if response.text:
+                    report.append("✅ `Google AI`: OK")
+                else:
+                    raise Exception("Empty response received")
+            except Exception as e:
+                error_summary = str(e).split('\n')[0]
+                report.append(f"❌ `Google AI`: FAILED\n   `Reason`: {error_summary}")
+                logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
+        else:
+            report.append("⚠️ `Google AI`: SKIPPED (no key)")
+
+        # --- Test OpenRouter ---
+        if "OpenRouter" in self.providers:
+            try:
+                # A simple, non-intensive query
+                test_prompt = "Hello"
+                or_response = await self._call_openrouter(test_prompt)
+                if or_response:
+                    report.append("✅ `OpenRouter`: OK")
+                else:
+                    raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
+            except Exception as e:
+                error_summary = str(e).split('\n')[0]
+                report.append(f"❌ `OpenRouter`: FAILED\n   `Reason`: {error_summary}")
+                logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
+        else:
+            report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
+
+        return "\n".join(report)
+
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
             return None
