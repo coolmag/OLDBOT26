@@ -112,53 +112,56 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="All download methods failed")
 
     async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
-        temp_path = str(target_path).replace(".mp3", "_sc_temp")
+        logger.info(f"🔵 [Cobalt] Trying fallback for SoundCloud query: {query}")
+        sc_url = None
         
-        # ⚠️ УМНЫЙ ФИЛЬТР: Отсекаем диджей-сеты (>12 мин) и превьюшки (<1 мин)
-        def duration_filter(info, *, incomplete):
-            duration = info.get('duration')
-            if duration:
-                if duration > 720:
-                    return 'Трек слишком длинный (Микс)'
-                if duration < 60:
-                    return 'Трек слишком короткий (Превью)'
-            return None
-
-        opts = {
-            'format': 'bestaudio/best', 
-            'outtmpl': temp_path, 
-            'quiet': True, 
-            'noprogress': True, 
-            'noplaylist': True,
-            'max_filesize': 20000000, 
-            # ⚠️ УДАЛЕН ГЛЮЧНЫЙ min_filesize
-            'nopart': True, 
-            'match_filter': duration_filter, # Работаем только через длительность!
-            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
-        }
-
-        # 🟢 Новый метод аутентификации SoundCloud через OAuth токен
-        if self._settings.SOUNDCLOUD_OAUTH_TOKEN:
-            logger.info("☁️ SoundCloud: Using OAuth Token for authentication.")
-            opts['username'] = 'oauth'
-            opts['password'] = self._settings.SOUNDCLOUD_OAUTH_TOKEN
-        else:
-            logger.warning("☁️ SoundCloud: No OAuth Token found. Download will likely fail.")
-
+        # 1. Получаем URL трека с SoundCloud через yt-dlp
         try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"scsearch1:{query}"))
-            paths = [Path(temp_path + ".mp3"), Path(temp_path)]
-            for p in paths:
-                if p.exists() and p.stat().st_size > 10000:
-                    if p != target_path:
-                        if target_path.exists(): target_path.unlink(missing_ok=True)
-                        p.rename(target_path)
-                    logger.info(f"✅ Success via SoundCloud: {query}") 
-                    return DownloadResult(success=True, file_path=target_path)
+            with yt_dlp.YoutubeDL({'quiet': True, 'noprogress': True, 'dump_single_json': True}) as ydl:
+                info = ydl.extract_info(f"scsearch1:{query}", download=False)
+                if info and 'webpage_url' in info:
+                    sc_url = info['webpage_url']
+                    logger.info(f"Found SoundCloud URL: {sc_url}")
         except Exception as e:
-            logger.error(f"SoundCloud fallback failed: {e}")
-        return DownloadResult(success=False, error_message="SC Fallback failed or track rejected")
+            logger.error(f"Failed to extract SoundCloud URL: {e}")
+            return DownloadResult(success=False, error_message="SC URL extraction failed")
+
+        if not sc_url:
+            return DownloadResult(success=False, error_message="No SoundCloud URL found")
+
+        # 2. Пробуем скачать через инстансы Cobalt
+        for instance in self._settings.COBALT_INSTANCES:
+            try:
+                api_url = f"{instance.rstrip('/')}/api/json"
+                payload = {"url": sc_url, "isAudioOnly": True}
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(api_url, json=payload, headers={'Accept': 'application/json'})
+                    response.raise_for_status()
+                    data = response.json()
+
+                    if data.get("status") == "stream":
+                        stream_url = data.get("url")
+                        logger.info(f"🔵 [Cobalt] Streaming from {stream_url} via {instance}")
+                        
+                        # 3. Скачиваем аудиопоток
+                        async with client.stream("GET", stream_url, timeout=60) as stream_response:
+                            stream_response.raise_for_status()
+                            with open(target_path, "wb") as f:
+                                async for chunk in stream_response.aiter_bytes():
+                                    f.write(chunk)
+                        
+                        if target_path.exists() and target_path.stat().st_size > 10000:
+                            logger.success(f"✅ Success via Cobalt+SoundCloud: {query}")
+                            return DownloadResult(success=True, file_path=target_path)
+                        else:
+                            logger.error("Cobalt download failed: file is too small or missing.")
+                            
+            except Exception as e:
+                logger.warning(f"🔵 [Cobalt] Instance {instance} failed: {e}")
+                continue # Пробуем следующий инстанс
+        
+        return DownloadResult(success=False, error_message="All Cobalt instances failed for SoundCloud")
 
     # 🟢 ДОБАВЛЕН НОВЫЙ МЕТОД:
     async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:
