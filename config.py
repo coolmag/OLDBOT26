@@ -76,7 +76,13 @@ class Settings(BaseSettings):
                 "https://pipedapi.drgns.space",
                 "https://piped-api.garudalinux.org"
             ],
-            "INVIDIOUS_INSTANCES": ["https://inv.nadeko.net", "https://invidious.nerdvpn.de"]
+            "INVIDIOUS_INSTANCES": [
+                "https://vid.priv.no",
+                "https://invidious.nerab.it",
+                "https://inv.vern.cc",
+                "https://invidious.protokolla.fi",
+                "https://invidious.projectsegfau.lt"
+            ]
         }
         field_name = info.field_name
         default_list = defaults.get(field_name, [])
