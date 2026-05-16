@@ -200,21 +200,12 @@ class YouTubeDownloader:
         return None
 
     def _run_yt_dlp(self, opts, url):
-        # 🟢 Добавляем cookies, если указаны
-        if self._settings.YTDLP_COOKIES_FILE and self._settings.YTDLP_COOKIES_FILE.exists():
-            opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
-            logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
-
-        # 🟢 Добавляем cookies из браузера как основной метод
-        opts['cookies-from-browser'] = ('chrome', 'firefox', 'edge', 'brave', 'opera')
-        
-        # 🟢 Указываем deno как JS-рантайм и добавляем общие опции для стабильности
+        # 🟢 Финальная стратегия: используем самый надежный метод аутентификации OAuth2
         final_opts = {
-            **opts, # Сохраняем все переданные опции
-            'retries': 5, # Больше попыток при сетевых ошибках
-            'js_runtimes': {'deno': {}}, # Явно указываем deno как рантайм в правильном формате
-            'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'], # Уменьшаем объем данных
-            'extractor_args': {'youtube': {'player_client': ['web']}} # Указываем веб-клиент для обхода детекции
+            **opts,
+            'retries': 3, # Уменьшаем кол-во попыток, т.к. OAuth либо работает, либо нет
+            'username': 'oauth2',
+            'compat_opts': ['no-live-chat', 'no-playlist-entries'],
         }
         with yt_dlp.YoutubeDL(final_opts) as ydl:
             ydl.download([url])
