@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import dataclasses
+import random
 from pathlib import Path
 from typing import List, Optional
 
@@ -109,7 +110,10 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="All download methods (Piped, yt-dlp) failed")
 
     async def _download_via_piped(self, video_id: str, target_path: Path) -> DownloadResult:
-        for instance in self._settings.PIPED_INSTANCES:
+        instances = self._settings.PIPED_INSTANCES.copy()
+        random.shuffle(instances)
+        
+        for instance in instances:
             try:
                 api_url = f"{instance.rstrip('/')}/streams/{video_id}"
                 async with httpx.AsyncClient() as client:
@@ -149,7 +153,6 @@ class YouTubeDownloader:
                 continue
         
         return DownloadResult(success=False, error_message="All Piped instances failed")
-
 
     # 🟢 ДОБАВЛЕН НОВЫЙ МЕТОД:
     async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:

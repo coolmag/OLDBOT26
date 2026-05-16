@@ -64,7 +64,18 @@ class Settings(BaseSettings):
     def _parse_instances(cls, v: Any, info: ValidationInfo) -> List[str]:
         defaults = {
             "COBALT_INSTANCES": ["https://api.cobalt.tools", "https://cobalt.ducks.party"],
-            "PIPED_INSTANCES": ["https://pipedapi.kavin.rocks", "https://pipedapi.moomoo.me"],
+            "PIPED_INSTANCES": [
+                "https://pipedapi.tokhmi.xyz",
+                "https://pipedapi.smnz.de",
+                "https://pipedapi.simpleprivacy.fr",
+                "https://pipedapi.qdi.fi",
+                "https://pipedapi.palveluntarjoaja.fi",
+                "https://pipedapi.ggc-project.de",
+                "https://pipedapi.garudalinux.org",
+                "https://pipedapi.frontend.im",
+                "https://pipedapi.drgns.space",
+                "https://piped-api.garudalinux.org"
+            ],
             "INVIDIOUS_INSTANCES": ["https://inv.nadeko.net", "https://invidious.nerdvpn.de"]
         }
         field_name = info.field_name
