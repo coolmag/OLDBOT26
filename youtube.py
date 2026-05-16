@@ -135,9 +135,16 @@ class YouTubeDownloader:
                 payload = {"url": sc_url, "isAudioOnly": True}
                 
                 async with httpx.AsyncClient() as client:
-                    response = await client.post(api_url, json=payload, headers={'Accept': 'application/json'})
+                    logger.debug(f"🔵 [Cobalt] Sending POST to {api_url} with payload: {payload}")
+                    response = await client.post(api_url, json=payload, headers={'Accept': 'application/json'}, timeout=45)
+                    
+                    logger.debug(f"🔵 [Cobalt] Received status {response.status_code}")
+                    if response.status_code != 200:
+                        logger.error(f"🔵 [Cobalt] Error response: {response.text}")
+
                     response.raise_for_status()
                     data = response.json()
+                    logger.debug(f"🔵 [Cobalt] Response JSON: {data}")
 
                     if data.get("status") == "stream":
                         stream_url = data.get("url")
