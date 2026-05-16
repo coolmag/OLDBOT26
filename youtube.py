@@ -92,64 +92,64 @@ class YouTubeDownloader:
                     return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # ⚡️ ПРЯМОЙ ФОЛЛБЭК НА SOUNDCLOUD (Без ожиданий)
-            artist = getattr(track_info, 'uploader', getattr(track_info, 'artist', ''))
-            sc_query = f"{artist} - {track_info.title}"
-            logger.info(f"☁️ [SoundCloud] Fast fallback. Searching '{sc_query}'...")
-            
-            sc_res = await self._download_soundcloud_fallback(sc_query, final_path)
-            if sc_res.success:
-                sc_res.track_info = track_info
-                return sc_res
+            # --- СТРАТЕГИЯ №1 (ОСНОВНАЯ): Piped API ---
+            logger.info(f"▶️ [Piped] Attempting direct download for {video_id}")
+            piped_res = await self._download_via_piped(video_id, final_path)
+            if piped_res.success:
+                piped_res.track_info = track_info
+                return piped_res
 
-            # 🟢 ДОБАВЛЕНО: Если SC не нашел, качаем с YouTube по ID!
-            logger.warning(f"🔴 [YouTube Native] SoundCloud failed. Pulling from YT directly: {video_id}")
+            # --- СТРАТЕГИЯ №2 (РЕЗЕРВНАЯ): Локальный yt-dlp ---
+            logger.warning(f"🟡 [yt-dlp Fallback] Piped failed. Falling back to local yt-dlp for {video_id}")
             yt_res = await self._download_youtube_native(video_id, final_path)
             if yt_res.success:
                 yt_res.track_info = track_info
                 return yt_res
                 
-        return DownloadResult(success=False, error_message="All download methods failed")
+        return DownloadResult(success=False, error_message="All download methods (Piped, yt-dlp) failed")
 
-    async def _download_soundcloud_fallback(self, query: str, target_path: Path) -> DownloadResult:
-        temp_path = str(target_path).replace(".mp3", "_sc_temp")
+    async def _download_via_piped(self, video_id: str, target_path: Path) -> DownloadResult:
+        for instance in self._settings.PIPED_INSTANCES:
+            try:
+                api_url = f"{instance.rstrip('/')}/streams/{video_id}"
+                async with httpx.AsyncClient() as client:
+                    logger.debug(f"▶️ [Piped] Querying {api_url}")
+                    response = await client.get(api_url, timeout=20)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    audio_streams = [s for s in data.get('audioStreams', []) if s.get('mimeType') == 'audio/mp4']
+                    if not audio_streams:
+                        logger.warning(f"▶️ [Piped] No M4A audio streams found on {instance} for {video_id}")
+                        continue
+                        
+                    best_stream = max(audio_streams, key=lambda s: s.get('bitrate', 0))
+                    stream_url = best_stream.get('url')
+                    
+                    if not stream_url:
+                        logger.warning(f"▶️ [Piped] Best stream has no URL on {instance}")
+                        continue
+
+                    logger.info(f"▶️ [Piped] Streaming from {instance} (Bitrate: {best_stream.get('bitrate')})")
+                    
+                    async with client.stream("GET", stream_url, timeout=120) as stream_response:
+                        stream_response.raise_for_status()
+                        with open(target_path, "wb") as f:
+                            async for chunk in stream_response.aiter_bytes():
+                                f.write(chunk)
+                    
+                    if target_path.exists() and target_path.stat().st_size > 10000:
+                        logger.success(f"✅ Success via Piped: {video_id}")
+                        return DownloadResult(success=True, file_path=target_path)
+                    else:
+                        logger.error(f"▶️ [Piped] Download failed: file is too small or missing from {instance}.")
+
+            except Exception as e:
+                logger.warning(f"▶️ [Piped] Instance {instance} failed for {video_id}: {e}")
+                continue
         
-        # ⚠️ УМНЫЙ ФИЛЬТР: Отсекаем диджей-сеты (>12 мин) и превьюшки (<1 мин)
-        def duration_filter(info, *, incomplete):
-            duration = info.get('duration')
-            if duration:
-                if duration > 720:
-                    return 'Трек слишком длинный (Микс)'
-                if duration < 60:
-                    return 'Трек слишком короткий (Превью)'
-            return None
+        return DownloadResult(success=False, error_message="All Piped instances failed")
 
-        opts = {
-            'format': 'bestaudio/best', 
-            'outtmpl': temp_path, 
-            'quiet': True, 
-            'noprogress': True, 
-            'noplaylist': True,
-            'max_filesize': 20000000, 
-            # ⚠️ УДАЛЕН ГЛЮЧНЫЙ min_filesize
-            'nopart': True, 
-            'match_filter': duration_filter, # Работаем только через длительность!
-            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
-        }
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"scsearch1:{query}"))
-            paths = [Path(temp_path + ".mp3"), Path(temp_path)]
-            for p in paths:
-                if p.exists() and p.stat().st_size > 10000:
-                    if p != target_path:
-                        if target_path.exists(): target_path.unlink(missing_ok=True)
-                        p.rename(target_path)
-                    logger.info(f"✅ Success via SoundCloud: {query}") 
-                    return DownloadResult(success=True, file_path=target_path)
-        except Exception as e:
-            logger.error(f"SoundCloud fallback failed: {e}")
-        return DownloadResult(success=False, error_message="SC Fallback failed or track rejected")
 
     # 🟢 ДОБАВЛЕН НОВЫЙ МЕТОД:
     async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:
@@ -200,5 +200,26 @@ class YouTubeDownloader:
         return None
 
     def _run_yt_dlp(self, opts, url):
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        # 🟢 Добавляем cookies, если они существуют. Это наш главный метод аутентификации.
+        if self._settings.YTDLP_COOKIES_FILE and self._settings.YTDLP_COOKIES_FILE.exists():
+            opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
+            logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
+        else:
+            # Если куки-файла нет, не имеет смысла даже пытаться качать с ютуба при текущих блокировках
+            logger.warning("No cookie file found, YouTube download will likely fail.")
+
+
+        # 🟢 КОМБИНИРОВАННАЯ СТРАТЕГИЯ: Cookies + Эмуляция клиента для обхода ошибок подписи
+        final_opts = {
+            **opts, 
+            'retries': 5, 
+            'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'],
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'tv', 'web'], 
+                    'skip': ['hls', 'dash'] 
+                }
+            }
+        }
+        with yt_dlp.YoutubeDL(final_opts) as ydl:
             ydl.download([url])
