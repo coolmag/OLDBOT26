@@ -238,8 +238,7 @@ User: {prompt}"""
         else:
             report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
 
-        return "
-".join(report)
+        return "\n".join(report)
         
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
