@@ -205,6 +205,9 @@ class YouTubeDownloader:
             opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
             logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
 
+        # 🟢 Добавляем cookies из браузера как основной метод
+        opts['cookies-from-browser'] = ('chrome', 'firefox', 'edge', 'brave', 'opera')
+        
         # 🟢 Указываем deno как JS-рантайм и добавляем общие опции для стабильности
         final_opts = {
             **opts, # Сохраняем все переданные опции
