@@ -92,19 +92,17 @@ class YouTubeDownloader:
                     return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # --------------------------------------------------------------------
-            # ⚠️ ВРЕМЕННО ОТКЛЮЧЕНО: SoundCloud/Cobalt нестабильны.
-            # Используем только прямой YouTube-загрузчик для максимальной надежности.
-            # artist = getattr(track_info, 'uploader', getattr(track_info, 'artist', ''))
-            # sc_query = f"{artist} - {track_info.title}"
-            # logger.info(f"☁️ [SoundCloud] Fast fallback. Searching '{sc_query}'...")
-            # sc_res = await self._download_soundcloud_fallback(sc_query, final_path)
-            # if sc_res.success:
-            #     sc_res.track_info = track_info
-            #     return sc_res
-            # logger.warning(f"🔴 [YouTube Native] SoundCloud failed. Pulling from YT directly: {video_id}")
-            # --------------------------------------------------------------------
+            # Приоритет №1: SoundCloud через Cobalt, т.к. это самый надежный метод по мнению пользователя
+            artist = getattr(track_info, 'uploader', getattr(track_info, 'artist', ''))
+            sc_query = f"{artist} - {track_info.title}"
+            
+            sc_res = await self._download_soundcloud_fallback(sc_query, final_path)
+            if sc_res.success:
+                sc_res.track_info = track_info
+                return sc_res
 
+            # Резервный вариант: если SoundCloud/Cobalt не сработал, пробуем YouTube
+            logger.warning(f"🟡 [YouTube Fallback] SoundCloud/Cobalt failed. Pulling from YT directly: {video_id}")
             yt_res = await self._download_youtube_native(video_id, final_path)
             if yt_res.success:
                 yt_res.track_info = track_info
