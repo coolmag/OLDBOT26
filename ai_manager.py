@@ -34,7 +34,7 @@ class AIManager:
             logger.info("✅ OpenRouter provider configured.")
 
         if self.providers:
-            logger.info(f"✅ ИИ успешно подключен (Мозг: Gemma 4 e2b, Логика/Уши: Gemini Flash, Резерв: OpenRouter)")
+            logger.info(f"✅ ИИ успешно подключен (Мозг: OpenRouter, Резерв: Google AI, Логика/Уши: Gemini Flash)")
         else:
             logger.error("❌ ВСЕ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
 
@@ -103,24 +103,33 @@ class AIManager:
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
         full_prompt = f"{system_prompt}\n\nUser: {prompt}"
         
-        # --- Level 1: Google AI (Primary) ---
+        # --- Level 1: OpenRouter (Primary) ---
+        if "OpenRouter" in self.providers:
+            try:
+                logger.info("🔄 Trying OpenRouter for Chat...")
+                response = await self._call_openrouter(full_prompt)
+                if response:
+                    return response
+                # Если OpenRouter вернул None, но не вызвал исключение, значит, была ошибка, залогированная внутри
+                raise Exception("OpenRouter returned None")
+            except Exception as e:
+                logger.error(f"❌ OpenRouter (Primary) failed: {e}")
+
+        # --- Level 2: Google AI (Gemma 4 Fallback) ---
         if "GoogleAI" in self.providers:
-            for attempt in range(2):
-                try:
-                    response = self.gemini_client.models.generate_content(
-                        model="gemma-4-e2b",
-                        contents=full_prompt,
-                        config=types.GenerateContentConfig(temperature=0.9)
-                    )
-                    logger.info("💬 Gemma 4 e2b (Chat) responded.")
-                    return response.text
-                except Exception as e:
-                    logger.error(f"❌ Gemma 4 attempt {attempt+1} failed: {e}")
-                    if "RESOURCE_EXHAUSTED" in str(e): break # No point retrying on quota errors
-                    import asyncio
-                    await asyncio.sleep(1)
+            try:
+                logger.warning("🔄 Falling back to Gemma 4 for Chat")
+                response = self.gemini_client.models.generate_content(
+                    model="gemma-4-e2b",
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(temperature=0.9)
+                )
+                logger.info("💬 Gemma 4 e2b (Chat) responded.")
+                return response.text
+            except Exception as e:
+                logger.error(f"❌ Gemma 4 fallback failed: {e}")
                     
-            # --- Level 2: Google AI (Fallback) ---
+            # --- Level 3: Google AI (Flash Fallback) ---
             try:
                 logger.warning("🔄 Falling back to Gemini Flash for Chat")
                 response = self.gemini_client.models.generate_content(
@@ -131,14 +140,6 @@ class AIManager:
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Flash fallback failed: {e}")
-
-        # --- Level 3: OpenRouter (Final Fallback) ---
-        if "OpenRouter" in self.providers:
-            try:
-                logger.warning("🔄 Falling back to OpenRouter for Chat")
-                return await self._call_openrouter(full_prompt)
-            except Exception as e:
-                logger.error(f"❌ OpenRouter fallback failed: {e}")
 
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
 
@@ -154,16 +155,16 @@ class AIManager:
                     "X-Title": "Aurora AI DJ"
                 },
                 json={
-                    "model": "mistralai/mistral-7b-instruct:free",
+                    "model": "deepseek/deepseek-v4-flash",
                     "messages": [
                         {"role": "user", "content": full_prompt}
                     ]
                 },
-                timeout=30
+                timeout=40
             )
             response.raise_for_status()
             data = response.json()
-            logger.info("💬 OpenRouter (Mistral 7B) responded.")
+            logger.info("💬 OpenRouter (DeepSeek V4 Flash) responded.")
             return data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
             logger.error(f"OpenRouter HTTP Error: {e.response.status_code} - {e.response.text}")
