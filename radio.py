@@ -290,12 +290,10 @@ class RadioSession:
                 if len(self.playlist) < 3: await self._fill_playlist()
                 if not self.playlist:
                     await self._update_status("📡 Поиск новой музыки...")
-                    await asyncio.sleep(5)
-                    await self._fill_playlist()
-                    if not self.playlist:
-                        self.failed_downloads_count += 1
-                        await asyncio.sleep(5)
-                        continue
+                    self.failed_downloads_count += 1
+                    logger.warning(f"[{self.chat_id}] Playlist is empty. Incrementing failure count to {self.failed_downloads_count}.")
+                    await asyncio.sleep(10) # Даем время перед следующей попыткой или сменой жанра
+                    continue
 
                 track = self.playlist.pop(0)
 
