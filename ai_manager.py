@@ -11,7 +11,7 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (Hybrid: Flash for JSON routing, Gemma 3 for Chat/Jokes).
+    🧠 AI Manager (OpenRouter First, Google AI Fallback).
     """
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -23,7 +23,7 @@ class AIManager:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ Google AI provider configured.")
+                logger.info("✅ Google AI provider configured (as fallback).")
             except Exception as e:
                 logger.error(f"❌ Google AI connection error: {e}")
 
@@ -31,10 +31,10 @@ class AIManager:
         if self.settings.OPENROUTER_API_KEY:
             self.openrouter_client = httpx.AsyncClient()
             self.providers.append("OpenRouter")
-            logger.info("✅ OpenRouter provider configured.")
+            logger.info("✅ OpenRouter provider configured (as primary).")
 
         if self.providers:
-            logger.info(f"✅ ИИ успешно подключен (Мозг: OpenRouter, Резерв: Google AI, Логика/Уши: Gemini Flash)")
+            logger.info(f"✅ ИИ успешно подключен (Основной мозг и логика: OpenRouter, Резерв: Google AI)")
         else:
             logger.error("❌ ВСЕ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
 
@@ -63,8 +63,13 @@ class AIManager:
         {{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
         """
 
+        # --- Level 1: OpenRouter (Primary for JSON) ---
+        if "OpenRouter" in self.providers:
+            res = await self._call_openrouter_for_json(prompt)
+            if res: return res
+
+        # --- Level 2: Google AI (Fallback for JSON) ---
         if "GoogleAI" in self.providers:
-            # 🔥 ИСПОЛЬЗУЕМ FLASH ДЛЯ 100% НАДЕЖНОГО JSON
             res = await self._call_flash_for_json(prompt)
             if res: return res
             
@@ -72,7 +77,7 @@ class AIManager:
 
     async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
         try:
-            # ⚠️ Gemini 2.5 Flash идеально парсит JSON
+            logger.warning("🔄 Falling back to Gemini Flash for JSON analysis")
             response = self.gemini_client.models.generate_content(
                 model="gemini-2.5-flash", 
                 contents=prompt,
@@ -82,6 +87,31 @@ class AIManager:
         except Exception as e:
             logger.error(f"❌ Flash API error (JSON): {e}")
             return None
+    
+    async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
+        if not self.settings.OPENROUTER_API_KEY: return None
+        logger.info("🔄 Trying OpenRouter for JSON analysis...")
+        try:
+            response = await self.openrouter_client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://github.com/coolmag/oldbot26",
+                    "X-Title": "Aurora AI DJ"
+                },
+                json={
+                    "model": "nousresearch/nous-hermes-2-mixtral-8x7b-dpo",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"}
+                },
+                timeout=20
+            )
+            response.raise_for_status()
+            data = response.json()
+            return self._parse_json(data["choices"][0]["message"]["content"])
+        except Exception as e:
+            logger.error(f"❌ OpenRouter JSON analysis failed: {e}")
+        return None
 
     def _regex_fallback(self, text: str) -> dict:
         logger.warning("⚠️ AI analysis failed. Using Regex Fallback.")
@@ -91,7 +121,6 @@ class AIManager:
         if any(k in text_lower for k in chat_keywords) and len(text.split()) < 6:
             return {"intent": "chat", "query": None}
             
-        # ⚠️ ДОБАВИЛИ ВСЕ СЛОВА ДЛЯ РАДИО
         radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'врубай', 'давай', 'послушаем', 'включи']
         if any(k in text_lower for k in radio_keywords):
             query = text
@@ -101,7 +130,9 @@ class AIManager:
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
+        full_prompt = f"{system_prompt}
+
+User: {prompt}"
         
         # --- Level 1: OpenRouter (Primary) ---
         if "OpenRouter" in self.providers:
@@ -110,7 +141,6 @@ class AIManager:
                 response = await self._call_openrouter(full_prompt)
                 if response:
                     return response
-                # Если OpenRouter вернул None, но не вызвал исключение, значит, была ошибка, залогированная внутри
                 raise Exception("OpenRouter returned None")
             except Exception as e:
                 logger.error(f"❌ OpenRouter (Primary) failed: {e}")
@@ -178,15 +208,16 @@ class AIManager:
         # --- Test Google AI ---
         if "GoogleAI" in self.providers:
             try:
-                # A simple, non-intensive query to a reliable model
                 response = self.gemini_client.models.generate_content("test", config=types.GenerateContentConfig(temperature=0.1))
                 if response.text:
                     report.append("✅ `Google AI`: OK")
                 else:
                     raise Exception("Empty response received")
             except Exception as e:
-                error_summary = str(e).split('\n')[0]
-                report.append(f"❌ `Google AI`: FAILED\n   `Reason`: {error_summary}")
+                error_summary = str(e).split('
+')[0]
+                report.append(f"❌ `Google AI`: FAILED
+   `Reason`: {error_summary}")
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
         else:
             report.append("⚠️ `Google AI`: SKIPPED (no key)")
@@ -194,7 +225,6 @@ class AIManager:
         # --- Test OpenRouter ---
         if "OpenRouter" in self.providers:
             try:
-                # A simple, non-intensive query
                 test_prompt = "Hello"
                 or_response = await self._call_openrouter(test_prompt)
                 if or_response:
@@ -202,16 +232,20 @@ class AIManager:
                 else:
                     raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
             except Exception as e:
-                error_summary = str(e).split('\n')[0]
-                report.append(f"❌ `OpenRouter`: FAILED\n   `Reason`: {error_summary}")
+                error_summary = str(e).split('
+')[0]
+                report.append(f"❌ `OpenRouter`: FAILED
+   `Reason`: {error_summary}")
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
         else:
             report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
 
-        return "\n".join(report)
-
+        return "
+".join(report)
+        
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
+            logger.warning("Voice transcription skipped: Google AI provider not configured.")
             return None
         try:
             response = self.gemini_client.models.generate_content(
