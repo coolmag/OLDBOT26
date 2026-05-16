@@ -130,9 +130,7 @@ class AIManager:
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        full_prompt = f"{system_prompt}
-
-User: {prompt}"
+        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
         
         # --- Level 1: OpenRouter (Primary) ---
         if "OpenRouter" in self.providers:
