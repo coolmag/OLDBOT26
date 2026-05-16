@@ -17,18 +17,26 @@ class AIManager:
         self.settings = settings
         self.providers = []
         
+        # Setup Google AI
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
-        
         if gemini_key:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 4 e2b, Логика/Уши: Gemini Flash)")
+                logger.info("✅ Google AI provider configured.")
             except Exception as e:
-                logger.error(f"❌ Ошибка подключения ИИ: {e}")
-                
-        if not self.providers:
-            logger.error("❌ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
+                logger.error(f"❌ Google AI connection error: {e}")
+
+        # Setup OpenRouter
+        if self.settings.OPENROUTER_API_KEY:
+            self.openrouter_client = httpx.AsyncClient()
+            self.providers.append("OpenRouter")
+            logger.info("✅ OpenRouter provider configured.")
+
+        if self.providers:
+            logger.info(f"✅ ИИ успешно подключен (Мозг: Gemma 4 e2b, Логика/Уши: Gemini Flash, Резерв: OpenRouter)")
+        else:
+            logger.error("❌ ВСЕ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
 
     async def analyze_message(self, text: str) -> dict:
         prompt = f"""Analyze this user message for a Telegram music bot.
@@ -93,10 +101,10 @@ class AIManager:
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
+        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
+        
+        # --- Level 1: Google AI (Primary) ---
         if "GoogleAI" in self.providers:
-            full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-            
-            # 🟢 Делаем 2 попытки генерации
             for attempt in range(2):
                 try:
                     response = self.gemini_client.models.generate_content(
@@ -107,11 +115,12 @@ class AIManager:
                     logger.info("💬 Gemma 4 e2b (Chat) responded.")
                     return response.text
                 except Exception as e:
-                    logger.error(f"❌ Gemini 1.5 Flash attempt {attempt+1} failed: {e}")
+                    logger.error(f"❌ Gemma 4 attempt {attempt+1} failed: {e}")
+                    if "RESOURCE_EXHAUSTED" in str(e): break # No point retrying on quota errors
                     import asyncio
-                    await asyncio.sleep(1) # Ждем 1 секунду перед повтором
+                    await asyncio.sleep(1)
                     
-            # 🟢 Фолбэк на Flash, если Gemma 3 упала оба раза
+            # --- Level 2: Google AI (Fallback) ---
             try:
                 logger.warning("🔄 Falling back to Gemini Flash for Chat")
                 response = self.gemini_client.models.generate_content(
@@ -123,7 +132,44 @@ class AIManager:
             except Exception as e:
                 logger.error(f"❌ Flash fallback failed: {e}")
 
+        # --- Level 3: OpenRouter (Final Fallback) ---
+        if "OpenRouter" in self.providers:
+            try:
+                logger.warning("🔄 Falling back to OpenRouter for Chat")
+                return await self._call_openrouter(full_prompt)
+            except Exception as e:
+                logger.error(f"❌ OpenRouter fallback failed: {e}")
+
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
+
+    async def _call_openrouter(self, full_prompt: str) -> Optional[str]:
+        if not self.settings.OPENROUTER_API_KEY: return None
+        
+        try:
+            response = await self.openrouter_client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://github.com/coolmag/oldbot26",
+                    "X-Title": "Aurora AI DJ"
+                },
+                json={
+                    "model": "mistralai/mistral-7b-instruct:free",
+                    "messages": [
+                        {"role": "user", "content": full_prompt}
+                    ]
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            logger.info("💬 OpenRouter (Mistral 7B) responded.")
+            return data["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"OpenRouter HTTP Error: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            logger.error(f"OpenRouter call failed: {e}")
+        return None
 
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
