@@ -110,6 +110,8 @@ async def lifespan(app: FastAPI):
             BotCommand("radio", "🎲 Случайная волна"),
             BotCommand("play", "🔎 Найти трек"),
             BotCommand("artist", "🎤 Режим одного исполнителя"),
+            BotCommand("rockdance", "🎸 Плейлист RockDance"),
+            BotCommand("toprock", "🤘 Случайный артист из RockDance"),
             BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
             BotCommand("skip", "⏭ Следующий трек"),
             BotCommand("stop", "🛑 Остановить"),
