@@ -136,6 +136,15 @@ class YouTubeDownloader:
             'match_filter': duration_filter, # Работаем только через длительность!
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
         }
+
+        # 🟢 Новый метод аутентификации SoundCloud через OAuth токен
+        if self._settings.SOUNDCLOUD_OAUTH_TOKEN:
+            logger.info("☁️ SoundCloud: Using OAuth Token for authentication.")
+            opts['username'] = 'oauth'
+            opts['password'] = self._settings.SOUNDCLOUD_OAUTH_TOKEN
+        else:
+            logger.warning("☁️ SoundCloud: No OAuth Token found. Download will likely fail.")
+
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, f"scsearch1:{query}"))
@@ -200,12 +209,26 @@ class YouTubeDownloader:
         return None
 
     def _run_yt_dlp(self, opts, url):
-        # 🟢 Финальная стратегия: используем самый надежный метод аутентификации OAuth2
+        # 🟢 Добавляем cookies, если они существуют. Это наш главный метод аутентификации.
+        if self._settings.YTDLP_COOKIES_FILE and self._settings.YTDLP_COOKIES_FILE.exists():
+            opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
+            logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
+        else:
+            # Если куки-файла нет, не имеет смысла даже пытаться качать с ютуба при текущих блокировках
+            logger.warning("No cookie file found, YouTube download will likely fail.")
+
+
+        # 🟢 КОМБИНИРОВАННАЯ СТРАТЕГИЯ: Cookies + Эмуляция клиента для обхода ошибок подписи
         final_opts = {
-            **opts,
-            'retries': 3, # Уменьшаем кол-во попыток, т.к. OAuth либо работает, либо нет
-            'username': 'oauth2',
-            'compat_opts': ['no-live-chat', 'no-playlist-entries'],
+            **opts, 
+            'retries': 5, 
+            'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'],
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'tv', 'web'], 
+                    'skip': ['hls', 'dash'] 
+                }
+            }
         }
         with yt_dlp.YoutubeDL(final_opts) as ydl:
             ydl.download([url])
