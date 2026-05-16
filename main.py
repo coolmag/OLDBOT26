@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
     downloader = YouTubeDownloader(settings, cache)
 
     # ------------------ 2. Создание и настройка Telegram App ------------------
-    builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(30)
+    builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(120)
     tg_app = builder.build()
 
     quiz_manager = QuizManager(settings, downloader, chat_manager, cache)

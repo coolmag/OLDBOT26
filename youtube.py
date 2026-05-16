@@ -200,5 +200,18 @@ class YouTubeDownloader:
         return None
 
     def _run_yt_dlp(self, opts, url):
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        # 🟢 Добавляем cookies, если указаны
+        if self._settings.YTDLP_COOKIES_FILE and self._settings.YTDLP_COOKIES_FILE.exists():
+            opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
+            logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
+
+        # 🟢 Указываем deno как JS-рантайм и добавляем общие опции для стабильности
+        final_opts = {
+            **opts, # Сохраняем все переданные опции
+            'retries': 5, # Больше попыток при сетевых ошибках
+            'js_runtimes': ['deno'], # Явно указываем deno как рантайм
+            'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'], # Уменьшаем объем данных
+            'extractor_args': {'youtube': {'player_client': ['web']}} # Указываем веб-клиент для обхода детекции
+        }
+        with yt_dlp.YoutubeDL(final_opts) as ydl:
             ydl.download([url])

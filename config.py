@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     TEMP_AUDIO_DIR: Path = WRITABLE_DIR / "temp_audio"
     CACHE_DB_PATH: Path = WRITABLE_DIR / "cache.db"
     COOKIES_FILE: Path = WRITABLE_DIR / "cookies.txt"
+    YTDLP_COOKIES_FILE: Optional[Path] = None # Новое поле для cookies.txt yt-dlp
     PROXIES_FILE: Path = WRITABLE_DIR / "working_proxies.txt"
     V2RAY_PROXIES_FILE: Path = WRITABLE_DIR / "hiddify_compatible_v2ray_proxies.txt"
     
@@ -76,6 +77,12 @@ class Settings(BaseSettings):
             except: return [i.strip() for i in v.split(",") if i.strip()]
         if isinstance(v, list): return v
         return default_list
+
+    @field_validator("YTDLP_COOKIES_FILE", mode="before")
+    @classmethod
+    def _parse_yt_dlp_cookies_file(cls, v: Any) -> Optional[Path]:
+        if v is None or not v.strip(): return None
+        return Path(v)
 
     @field_validator("ADMIN_ID_LIST", mode="before")
     @classmethod

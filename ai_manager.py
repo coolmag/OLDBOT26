@@ -23,7 +23,7 @@ class AIManager:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 3, Логика/Уши: Gemini Flash)")
+                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 7B, Логика/Уши: Gemini Flash)")
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения ИИ: {e}")
                 
@@ -100,7 +100,7 @@ class AIManager:
             for attempt in range(2):
                 try:
                     response = self.gemini_client.models.generate_content(
-                        model="gemma-3-27b-it",
+                        model="gemma-7b-it",
                         contents=full_prompt,
                         config=types.GenerateContentConfig(temperature=0.9)
                     )
