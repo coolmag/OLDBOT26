@@ -111,6 +111,16 @@ class RadioSession:
     quiz_title: str = field(init=False, default="")
     quiz_full: str = field(init=False, default="")
     last_quiz_time: float = field(init=False, default_factory=time.time)
+
+    async def _send_telegram_message_with_retry(self, func, *args, **kwargs):
+        while True:
+            try:
+                return await func(*args, **kwargs)
+            except RetryAfter as e:
+                logger.warning(f"[{self.chat_id}] Flood control exceeded. Retrying in {e.retry_after} seconds.")
+                await asyncio.sleep(e.retry_after)
+            except Exception as e:
+                raise e # Re-raise other exceptions
     
     async def start(self):
         if self.is_running: return
@@ -268,13 +278,13 @@ class RadioSession:
                             
                             if voice_path.exists():
                                 with open(voice_path, 'rb') as f:
-                                    await self.bot.send_voice(self.chat_id, voice=f)
+                                    await self._send_telegram_message_with_retry(self.bot.send_voice, self.chat_id, voice=f)
                                 os.unlink(voice_path)
                             else:
                                 raise FileNotFoundError("Voice file not created")
                         except Exception as e:
                             logger.error(f"Voice generation failed: {e}")
-                            await self.bot.send_message(self.chat_id, f"🎙 {announcement}")
+                            await self._send_telegram_message_with_retry(self.bot.send_message, self.chat_id, f"🎙 {announcement}")
                     await asyncio.sleep(2)
 
                 if len(self.playlist) < 3: await self._fill_playlist()

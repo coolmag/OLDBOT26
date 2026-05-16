@@ -23,7 +23,7 @@ class AIManager:
             try:
                 self.gemini_client = genai.Client(api_key=gemini_key)
                 self.providers.append("GoogleAI")
-                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 7B, Логика/Уши: Gemini Flash)")
+                logger.info("✅ ИИ успешно подключен (Мозг: Gemma 4 e2b, Логика/Уши: Gemini Flash)")
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения ИИ: {e}")
                 
@@ -100,14 +100,14 @@ class AIManager:
             for attempt in range(2):
                 try:
                     response = self.gemini_client.models.generate_content(
-                        model="gemma-7b-it",
+                        model="gemma-4-e2b",
                         contents=full_prompt,
                         config=types.GenerateContentConfig(temperature=0.9)
                     )
-                    logger.info("💬 Gemma 3 27B (Chat) responded.")
+                    logger.info("💬 Gemma 4 e2b (Chat) responded.")
                     return response.text
                 except Exception as e:
-                    logger.error(f"❌ Gemma 3 attempt {attempt+1} failed: {e}")
+                    logger.error(f"❌ Gemini 1.5 Flash attempt {attempt+1} failed: {e}")
                     import asyncio
                     await asyncio.sleep(1) # Ждем 1 секунду перед повтором
                     

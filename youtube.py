@@ -209,7 +209,7 @@ class YouTubeDownloader:
         final_opts = {
             **opts, # Сохраняем все переданные опции
             'retries': 5, # Больше попыток при сетевых ошибках
-            'js_runtimes': ['deno'], # Явно указываем deno как рантайм
+            'js_runtimes': {'deno': {}}, # Явно указываем deno как рантайм в правильном формате
             'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'], # Уменьшаем объем данных
             'extractor_args': {'youtube': {'player_client': ['web']}} # Указываем веб-клиент для обхода детекции
         }
