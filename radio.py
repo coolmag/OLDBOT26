@@ -348,10 +348,17 @@ class RadioSession:
 
                 success = await self._send_track(track, result, disable_cache=disable_cache)
                 
-                if success:
+                if success and track.duration > 0:
+                    try:
+                        # Wait for track to finish (duration + 5s buffer), or until skip is called
+                        await asyncio.wait_for(self.skip_event.wait(), timeout=float(track.duration + 5))
+                    except asyncio.TimeoutError:
+                        pass  # This is the expected behavior for a track finishing
+                elif success: # track has no duration, use default
                     try: await asyncio.wait_for(self.skip_event.wait(), timeout=360.0)
-                    except asyncio.TimeoutError: pass 
-                else: await asyncio.sleep(2)
+                    except asyncio.TimeoutError: pass
+                else: # Sending failed
+                    await asyncio.sleep(2)
                 
                 self.skip_event.clear()
             except asyncio.CancelledError: break
@@ -441,10 +448,27 @@ class RadioManager:
 
     async def start(self, chat_id: int, query: str, chat_type: Optional[str] = None, display_name: Optional[str] = None, decade: Optional[str] = None):
         async with self._get_lock(chat_id):
-            if chat_id in self._sessions:
+            # Если сессия уже существует и активна, обновляем её, не останавливая
+            if (session := self._sessions.get(chat_id)) and session.is_running:
+                final_query = query
+                final_display_name = display_name or query
+                
+                if query == "random": 
+                    random_query, random_decade, random_display_name = get_random_catalog_query()
+                    final_query = random_query
+                    final_display_name = random_display_name
+                    if not decade: decade = random_decade # Обновляем decade, если не задан
+
+                logger.info(f"[{chat_id}] 🔄 Смена волны с '{session.display_name}' на '{final_display_name}'")
+                await session.set_temporary_query(final_query, final_display_name)
+                session.decade = decade # Обновляем decade в сессии
+                session.is_temporary_mode = False # Теперь это не временный, а основной режим
+                return # Выходим, существующая сессия продолжит работу с новой волной
+
+            # Иначе (если сессии нет или она неактивна), создаем новую, как раньше
+            if chat_id in self._sessions: # Очищаем неактивную или зависшую сессию, если есть
                 await self._sessions[chat_id].stop()
             
-            # 🟢 Логика выбора случайного жанра при старте
             final_query = query
             final_display_name = display_name or query
             final_decade = decade
@@ -452,7 +476,7 @@ class RadioManager:
             if query == "random": 
                 random_query, random_decade, random_display_name = get_random_catalog_query()
                 final_query = random_query
-                final_display_name = random_display_name # 🟢 Используем имя реального жанра
+                final_display_name = random_display_name
                 if not final_decade: 
                     final_decade = random_decade
 

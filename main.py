@@ -146,7 +146,10 @@ async def lifespan(app: FastAPI):
     await radio_manager.stop_all()
     if tg_app.updater and tg_app.updater.running:
         await tg_app.updater.stop()
-    await tg_app.stop()
+    try:
+        await tg_app.stop()
+    except RuntimeError: # Игнорируем ошибку, если приложение уже остановлено
+        pass
     await tg_app.shutdown()
     await cache.close()
 
