@@ -205,9 +205,11 @@ class YouTubeDownloader:
 
     def _run_yt_dlp(self, opts, url):
         # 🟢 Добавляем cookies, если они существуют. Это наш главный метод аутентификации.
-        if self._settings.YTDLP_COOKIES_FILE and self._settings.YTDLP_COOKIES_FILE.exists():
-            opts['cookiefile'] = str(self._settings.YTDLP_COOKIES_FILE)
-            logger.info(f"Using cookiefile: {self._settings.YTDLP_COOKIES_FILE}")
+        cookie_file_to_use = self._settings.YTDLP_COOKIES_FILE or self._settings.COOKIES_FILE
+
+        if cookie_file_to_use and cookie_file_to_use.exists():
+            opts['cookiefile'] = str(cookie_file_to_use)
+            logger.info(f"Using cookiefile: {cookie_file_to_use}")
         else:
             # Если куки-файла нет, не имеет смысла даже пытаться качать с ютуба при текущих блокировках
             logger.warning("No cookie file found, YouTube download will likely fail.")
