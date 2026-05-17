@@ -163,7 +163,7 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "ok", "engine": "Aurora Docker v3.5"}
 
