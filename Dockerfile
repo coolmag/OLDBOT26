@@ -7,7 +7,7 @@ WORKDIR /app
 # Обновляем список пакетов и устанавливаем FFmpeg
 # RUN apt-get update говорит системе обновить список доступных пакетов
 # RUN apt-get install -y ffmpeg устанавливает сам FFmpeg. Ключ -y автоматически отвечает "да" на все запросы.
-RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg nodejs
 
 # Копируем файл с зависимостями в контейнер
 COPY requirements.txt .

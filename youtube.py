@@ -111,11 +111,17 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="All download methods (SoundCloud, yt-dlp) failed")
 
     async def _download_via_soundcloud(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
-        """Ищет и скачивает трек с SoundCloud по данным из TrackInfo."""
-        if not track_info.uploader or not track_info.title:
+        """Ищет и скачивает трек с SoundCloud, пробуя несколько вариантов запроса для обхода DRM."""
+        if not track_info.title:
             return DownloadResult(success=False, error_message="Not enough track info for SoundCloud search")
 
-        search_query = f"scsearch1:{track_info.uploader} - {track_info.title}"
+        # Генерируем несколько вариантов поисковых запросов
+        search_queries = [
+            f"scsearch1:{track_info.uploader} - {track_info.title}",
+            f"scsearch1:{track_info.title}",
+            f"scsearch1:{track_info.title} audio",
+        ]
+        
         temp_path = str(target_path).replace(".mp3", "_sc_temp")
         
         opts = {
@@ -128,10 +134,9 @@ class YouTubeDownloader:
             'sleep_interval': 8,
             'max_sleep_interval': 15,
             'ratelimit': 800_000,
-            'retries': 3,
+            'retries': 2, # Снижаем ретраи для быстрого переключения
         }
         
-        # Используем специальный файл куки для SoundCloud
         sc_cookies = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
         if sc_cookies.exists():
             opts['cookiefile'] = str(sc_cookies)
@@ -139,26 +144,42 @@ class YouTubeDownloader:
         else:
             logger.warning("No soundcloud_cookies.txt found. Download will likely fail or be low quality.")
 
-        try:
-            loop = asyncio.get_running_loop()
-            logger.info(f"☁️ [yt-dlp] Searching SoundCloud: {search_query}")
-            await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, search_query))
+        for query in search_queries:
+            try:
+                loop = asyncio.get_running_loop()
+                logger.info(f"☁️ [yt-dlp] Searching SoundCloud with query: '{query}'")
+                
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, query)),
+                    timeout=60.0
+                )
 
-            paths = [Path(temp_path + ".mp3"), Path(temp_path)]
-            for p in paths:
-                if p.exists() and p.stat().st_size > 10000:
-                    if p != target_path:
-                        if target_path.exists(): target_path.unlink(missing_ok=True)
-                        p.rename(target_path)
-                    logger.success(f"✅ Success via SoundCloud: {search_query}")
-                    return DownloadResult(success=True, file_path=target_path)
+                paths = [Path(temp_path + ".mp3"), Path(temp_path)]
+                for p in paths:
+                    if p.exists() and p.stat().st_size > 10000:
+                        if p != target_path:
+                            if target_path.exists(): target_path.unlink(missing_ok=True)
+                            p.rename(target_path)
+                        logger.info(f"✅ Success via SoundCloud with query: {query}") # ИСПРАВЛЕНО
+                        return DownloadResult(success=True, file_path=target_path)
 
-            logger.error("☁️ SoundCloud download finished but file is missing or too small.")
-            return DownloadResult(success=False, error_message="SoundCloud file not found")
+                logger.warning(f"☁️ Query '{query}' resulted in a file that is missing or too small.")
+                continue
 
-        except Exception as e:
-            logger.error(f"☁️ SoundCloud download failed: {e}")
-            return DownloadResult(success=False, error_message=str(e))
+            except asyncio.TimeoutError:
+                logger.error(f"☁️ SoundCloud download timed out for query: '{query}'")
+                continue 
+
+            except Exception as e:
+                if "This video is DRM protected" in str(e):
+                    logger.warning(f"☁️ Query '{query}' failed due to DRM. Trying next query...")
+                    continue
+                
+                logger.error(f"☁️ SoundCloud download failed for query '{query}': {e}")
+                continue
+        
+        logger.error(f"☁️ All SoundCloud search attempts failed for track: {track_info.title}")
+        return DownloadResult(success=False, error_message="All SoundCloud search attempts failed")
             
     async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:
         """Резервный метод скачивания с YouTube. Менее надежен."""
