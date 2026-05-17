@@ -298,7 +298,19 @@ class RadioSession:
                 track = self.playlist.pop(0)
 
                 await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
-                result = await self.downloader.download(track.identifier, track_info=track)
+                try:
+                    logger.info(f"[{self.chat_id}] Calling downloader for track: {track.title} ({track.identifier})")
+                    # Таймаут в 3 минуты (180 секунд) на всю операцию скачивания
+                    result = await asyncio.wait_for(
+                        self.downloader.download(track.identifier, track_info=track),
+                        timeout=180.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"[{self.chat_id}] TIMEOUT: Download for {track.title} took too long.")
+                    result = None
+                except Exception as e:
+                    logger.error(f"[{self.chat_id}] UNCAUGHT exception during download call: {e}", exc_info=True)
+                    result = None
                 
                 is_valid_file = False
                 if result and result.success:
