@@ -77,11 +77,10 @@ class Settings(BaseSettings):
                 "https://piped-api.garudalinux.org"
             ],
             "INVIDIOUS_INSTANCES": [
-                "https://vid.priv.no",
-                "https://invidious.nerab.it",
-                "https://inv.vern.cc",
-                "https://invidious.protokolla.fi",
-                "https://invidious.projectsegfau.lt"
+                "https://yewtu.be",
+                "https://invidious.snopyta.org",
+                "https://inv.riverside.rocks",
+                "https://invidio.xamh.de",
             ]
         }
         field_name = info.field_name

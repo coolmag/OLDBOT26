@@ -93,8 +93,15 @@ class YouTubeDownloader:
                     return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # --- СТРАТЕГИЯ №1: Invidious API ---
-            logger.info(f"▶️ [Invidious] Attempting direct download for {video_id}")
+            # --- СТРАТЕГИЯ №1: Piped API ---
+            logger.info(f"▶️ [Piped] Attempting direct download for {video_id}")
+            piped_res = await self._download_via_piped(video_id, final_path)
+            if piped_res.success:
+                piped_res.track_info = track_info
+                return piped_res
+
+            # --- СТРАТЕГИЯ №2: Invidious API ---
+            logger.warning(f"🟡 [Invidious Fallback] Piped failed. Trying Invidious for {video_id}")
             invidious_res = await self._download_via_invidious(video_id, final_path)
             if invidious_res.success:
                 invidious_res.track_info = track_info
@@ -109,6 +116,50 @@ class YouTubeDownloader:
                 
         return DownloadResult(success=False, error_message="All download methods (Piped, Invidious, yt-dlp) failed")
 
+    async def _download_via_piped(self, video_id: str, target_path: Path) -> DownloadResult:
+        instances = self._settings.PIPED_INSTANCES.copy()
+        random.shuffle(instances)
+
+        for instance in instances:
+            try:
+                api_url = f"{instance.rstrip('/')}/streams/{video_id}"
+                async with httpx.AsyncClient() as client:
+                    logger.debug(f"▶️ [Piped] Querying {api_url}")
+                    response = await client.get(api_url, timeout=20)
+                    response.raise_for_status()
+                    data = response.json()
+
+                    audio_streams = [s for s in data.get('audioStreams', []) if s.get('mimeType') == 'audio/mp4']
+                    if not audio_streams:
+                        logger.warning(f"▶️ [Piped] No M4A audio streams found on {instance} for {video_id}")
+                        continue
+
+                    best_stream = max(audio_streams, key=lambda s: s.get('bitrate', 0))
+                    stream_url = best_stream.get('url')
+
+                    if not stream_url:
+                        logger.warning(f"▶️ [Piped] Best stream has no URL on {instance}")
+                        continue
+                    
+                    logger.info(f"▶️ [Piped] Streaming from {instance} (Bitrate: {best_stream.get('bitrate')})")
+                    
+                    async with client.stream("GET", stream_url, timeout=120) as stream_response:
+                        stream_response.raise_for_status()
+                        with open(target_path, "wb") as f:
+                            async for chunk in stream_response.aiter_bytes():
+                                f.write(chunk)
+                    
+                    if target_path.exists() and target_path.stat().st_size > 10000:
+                        logger.success(f"✅ Success via Piped: {video_id}")
+                        return DownloadResult(success=True, file_path=target_path)
+                    else:
+                        logger.error(f"▶️ [Piped] Download failed: file is too small or missing from {instance}.")
+
+            except Exception as e:
+                logger.warning(f"▶️ [Piped] Instance {instance} failed for {video_id}: {e}")
+                continue
+        
+        return DownloadResult(success=False, error_message="All Piped instances failed")
 
     async def _download_via_invidious(self, video_id: str, target_path: Path) -> DownloadResult:
         instances = self._settings.INVIDIOUS_INSTANCES.copy()
@@ -155,16 +206,17 @@ class YouTubeDownloader:
         
         return DownloadResult(success=False, error_message="All Invidious instances failed")
 
-    # 🟢 ДОБАВЛЕН НОВЫЙ МЕТОД:
     async def _download_youtube_native(self, video_id: str, target_path: Path) -> DownloadResult:
         temp_path = str(target_path).replace(".mp3", "_yt_temp")
         opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': temp_path,
             'quiet': True,
             'noprogress': True,
-            'max_filesize': 25000000, 
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+            'max_filesize': 25_000_000,
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+            'force_ipv4': True,
+            'js_runtimes': ['node'],
         }
         try:
             loop = asyncio.get_running_loop()
@@ -214,15 +266,13 @@ class YouTubeDownloader:
             # Если куки-файла нет, не имеет смысла даже пытаться качать с ютуба при текущих блокировках
             logger.warning("No cookie file found, YouTube download will likely fail.")
 
-
-        # 🟢 КОМБИНИРОВАННАЯ СТРАТЕГИЯ: Cookies + Эмуляция клиента для обхода ошибок подписи
         final_opts = {
             **opts, 
-            'retries': 5, 
-            'compat_opts': ['no-live-chat', 'no-playlist-entries', 'no-xml-channel'],
+            'retries': 3,
+            'compat_opts': ['no-live-chat', 'no-playlist-entries'],
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios', 'tv', 'web'], 
+                    'player_client': ['web', 'tv'], 
                     'skip': ['hls', 'dash'] 
                 }
             }
