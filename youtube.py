@@ -185,7 +185,10 @@ class YouTubeDownloader:
         try:
             loop = asyncio.get_running_loop()
             url = f"https://www.youtube.com/watch?v={video_id}"
-            await loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, url))
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self._run_yt_dlp(opts, url)),
+                timeout=60.0
+            )
             
             paths = [Path(temp_path + ".mp3"), Path(temp_path)]
             for p in paths:
@@ -195,9 +198,14 @@ class YouTubeDownloader:
                         p.rename(target_path)
                     logger.info(f"✅ Success via Native YouTube: {video_id}") 
                     return DownloadResult(success=True, file_path=target_path)
+        
+        except asyncio.TimeoutError:
+            logger.error(f"Native YouTube fallback timed out for {video_id}")
+            return DownloadResult(success=False, error_message="Native YouTube download timed out")
+
         except Exception as e:
             logger.error(f"Native YouTube fallback failed for {video_id}: {e}")
-        return DownloadResult(success=False, error_message="YT Native failed")
+            return DownloadResult(success=False, error_message="YT Native failed")
 
     def _run_yt_dlp(self, opts, url):
         """Универсальный метод для запуска yt-dlp в executor'е."""
