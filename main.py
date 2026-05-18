@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
 
-    logger.info("⚡ Система запускается (v5.1 Final)...")
+    logger.info("⚡ Система запускается (v6.4 - Jamendo & FFprobe Update)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg обнаружен.")
     else: logger.warning("⚠️ FFmpeg не найден в системе! Загрузка невозможна.")
 

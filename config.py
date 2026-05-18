@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_ID: Optional[str] = None
     SPOTIFY_CLIENT_SECRET: Optional[str] = None
     OPENROUTER_API_KEY: str = ""
+    JAMENDO_CLIENT_ID: str = ""
 
     
     COBALT_INSTANCES: Union[List[str], str, None] = None
