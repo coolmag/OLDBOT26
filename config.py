@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_DOWNLOADS: int = 3
     DOWNLOAD_TIMEOUT: int = 120
     TRACK_MAX_DURATION_S: int = 900
+    TRACK_MIN_DURATION_S: int = 60
     ENABLE_AI_DJ_INTRO: bool = False # Включает/выключает генерацию голосовой подводки от AI DJ перед треком
 
     @field_validator("COBALT_INSTANCES", "PIPED_INSTANCES", "INVIDIOUS_INSTANCES", mode="before")
