@@ -2,7 +2,8 @@ import asyncio
 import logging
 import shutil
 import os
-import time # 🟢 Добавить наверх, если нет
+import time
+import random
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,46 +26,41 @@ from handlers import setup_handlers
 
 logger = logging.getLogger("main")
 
-# 🟢 Новая фоновая задача ТОЛЬКО для очистки и поллинга (если нет вебхука)
 async def background_tasks(app: FastAPI):
     logger.info("⏳ Запуск фоновых задач (Сборщик мусора & Polling-fallback)...")
     settings = app.state.settings
     tg_app = app.state.tg_app
 
-    # Запускаем polling только если не используется вебхук
     if not settings.WEBHOOK_URL:
-        # Эти два вызова нужны для запуска встроенного поллинга
         await tg_app.start()
         if tg_app.updater:
             await tg_app.updater.start_polling()
             logger.info("📡 Webhook URL не найден. Запущен Long Polling!")
 
-    # Бесконечный цикл сборщика мусора
     downloads_dir = settings.DOWNLOADS_DIR
     while True:
         try:
             now = time.time()
             for ext in ("*.mp3", "*.mp4", "*.ogg"):
                 for file_path in downloads_dir.glob(ext):
-                    if file_path.is_file() and now - file_path.stat().st_mtime > 3600: # 1 час
+                    if file_path.is_file() and now - file_path.stat().st_mtime > 3600:
                         try:
                             file_path.unlink()
                             logger.debug(f"🗑 Сборщик мусора удалил: {file_path.name}")
-                        except OSError: # Файл может быть занят
+                        except OSError:
                             pass
         except Exception as e:
             logger.error(f"Ошибка в работе сборщика мусора: {e}")
-        await asyncio.sleep(600) # Проверять каждые 10 минут
+        await asyncio.sleep(600)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ------------------ 1. Инициализация всех базовых сервисов ------------------
     setup_logging()
     settings = get_settings()
     app.state.settings = settings
 
-    logger.info("⚡ Система запускается (v6.7 - Openverse Fix)...")
+    logger.info("⚡ Система запускается (v6.8 - 404 Suppressor)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg обнаружен.")
     else: logger.warning("⚠️ FFmpeg не найден в системе! Загрузка невозможна.")
 
@@ -75,23 +71,17 @@ async def lifespan(app: FastAPI):
     chat_manager = ChatManager(ai_manager, cache)
     downloader = YouTubeDownloader(settings, cache)
 
-    # ------------------ 2. Создание и настройка Telegram App ------------------
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(120)
     tg_app = builder.build()
 
     quiz_manager = QuizManager(settings, downloader, chat_manager, cache)
     radio_manager = RadioManager(
-        bot=tg_app.bot,
-        settings=settings,
-        downloader=downloader,
-        chat_manager=chat_manager,
-        quiz_manager=quiz_manager
+        bot=tg_app.bot, settings=settings, downloader=downloader,
+        chat_manager=chat_manager, quiz_manager=quiz_manager
     )
 
     tg_app.bot_data['radio_manager'] = radio_manager
     tg_app.bot_data['quiz_manager'] = quiz_manager
-    
-    # Связываем менеджеры с приложением для доступа в хендлерах
     tg_app.ai_manager = ai_manager
     tg_app.chat_manager = chat_manager
     tg_app.downloader = downloader
@@ -100,23 +90,16 @@ async def lifespan(app: FastAPI):
     
     setup_handlers(tg_app)
     
-    # ------------------ 3. КРИТИЧЕСКАЯ СИНХРОНИЗАЦИЯ ПЕРЕД СТАРТОМ ------------------
-    # Эти вызовы должны завершиться ДО того, как сервер начнет принимать запросы
     try:
         logger.info("🔌 Попытка подключения к Telegram...")
-        await tg_app.initialize() # <--- САМЫЙ ВАЖНЫЙ ШАГ
+        await tg_app.initialize()
 
         commands = [
-            BotCommand("radio", "🎲 Случайная волна"),
-            BotCommand("play", "🔎 Найти трек"),
-            BotCommand("artist", "🎤 Режим одного исполнителя"),
-            BotCommand("rockdance", "🎸 Плейлист RockDance"),
-            BotCommand("toprock", "🤘 Случайный артист из RockDance"),
-            BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
-            BotCommand("skip", "⏭ Следующий трек"),
-            BotCommand("stop", "🛑 Остановить"),
-            BotCommand("admin", "⚙️ Настройки"),
-            BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
+            BotCommand("radio", "🎲 Случайная волна"), BotCommand("play", "🔎 Найти трек"),
+            BotCommand("artist", "🎤 Режим одного исполнителя"), BotCommand("rockdance", "🎸 Плейлист RockDance"),
+            BotCommand("toprock", "🤘 Случайный артист из RockDance"), BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
+            BotCommand("skip", "⏭ Следующий трек"), BotCommand("stop", "🛑 Остановить"),
+            BotCommand("admin", "⚙️ Настройки"), BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
         ]
         await tg_app.bot.set_my_commands(commands)
 
@@ -127,20 +110,16 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Бот полностью инициализирован и готов к работе!")
     except Exception as e:
         logger.error(f"⚠️ Критическая ошибка при инициализации Telegram: {e}", exc_info=True)
-        # Перевыбрасываем исключение, чтобы Vercel точно показал сбой
         raise
 
-    # ------------------ 4. Передача состояния и запуск фоновых задач ------------------
     app.state.tg_app = tg_app
     app.state.chat_manager = chat_manager
     app.state.downloader = downloader
 
-    # Запускаем некритичные задачи (сборщик мусора, поллинг) в фоне
     background_task = asyncio.create_task(background_tasks(app))
 
-    yield # <--- СЕРВЕР ЗАПУСКАЕТСЯ ТОЛЬКО ЗДЕСЬ
+    yield
 
-    # ------------------ 5. Корректное завершение работы ------------------
     logger.info("🔻 Система останавливается...")
     background_task.cancel()
     await radio_manager.stop_all()
@@ -148,7 +127,7 @@ async def lifespan(app: FastAPI):
         await tg_app.updater.stop()
     try:
         await tg_app.stop()
-    except RuntimeError: # Игнорируем ошибку, если приложение уже остановлено
+    except RuntimeError:
         pass
     await tg_app.shutdown()
     await cache.close()
@@ -191,7 +170,8 @@ async def get_playlist(query: str, request: Request):
 @app.get("/stream/{video_id}")
 async def stream_audio(video_id: str, request: Request):
     downloader = request.app.state.downloader
-    final_path = request.app.state.settings.DOWNLOADS_DIR / f"{video_id}.mp3"
+    settings = request.app.state.settings
+    final_path = settings.DOWNLOADS_DIR / f"{video_id}.mp3"
     
     if final_path.exists():
         return FileResponse(path=final_path, media_type="audio/mpeg", headers={"Accept-Ranges": "bytes"})
@@ -200,7 +180,20 @@ async def stream_audio(video_id: str, request: Request):
     if res.success and res.file_path:
         return FileResponse(path=res.file_path, media_type="audio/mpeg", headers={"Accept-Ranges": "bytes"})
     
-    return JSONResponse(status_code=404, content={"error": "Not found"})
+    # 404 Suppressor Logic: Play a random track instead of returning an error
+    logger.warning(f"Track {video_id} not found or failed to download. Serving a random fallback.")
+    try:
+        downloads_dir = settings.DOWNLOADS_DIR
+        existing_tracks = list(downloads_dir.glob("*.mp3"))
+        if existing_tracks:
+            random_track = random.choice(existing_tracks)
+            logger.info(f"Fallback: serving random track {random_track.name}")
+            return FileResponse(path=random_track, media_type="audio/mpeg", headers={"Accept-Ranges": "bytes"})
+    except Exception as e:
+        logger.error(f"Failed to serve random fallback track: {e}")
+
+    # Final fallback if downloads directory is empty or another error occurs
+    return JSONResponse(status_code=404, content={"error": "Not found and no fallbacks available"})
 
 @app.get("/api/ai/dj")
 async def api_ai_dj(prompt: str, request: Request):
@@ -229,5 +222,3 @@ if not static_dir.exists():
     static_dir.mkdir()
     
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-# Никаких if __name__ == "__main__": здесь больше нет!
