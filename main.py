@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
 
-    logger.info("⚡ Система запускается (v6.6 - Final Stable)...")
+    logger.info("⚡ Система запускается (v6.7 - Openverse Fix)...")
     if shutil.which("ffmpeg"): logger.info("✅ FFmpeg обнаружен.")
     else: logger.warning("⚠️ FFmpeg не найден в системе! Загрузка невозможна.")
 

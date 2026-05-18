@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v6.6 - Final Stable).
-    This version uses a focused 4-source pipeline for maximum reliability.
+    🎵 Aurora Downloader Engine (v6.7 - Openverse Fix).
+    This version fixes the Openverse API endpoint.
 
     Download pipeline:
     1. Jamendo (API)
