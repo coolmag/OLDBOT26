@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v6.7 - Openverse Fix).
+    🎵 Aurora Downloader Engine (v6.8 - 404 Suppressor).
     This version fixes the Openverse API endpoint.
 
     Download pipeline:
@@ -79,10 +79,10 @@ class YouTubeDownloader:
 
         async with self.semaphore:
             methods = [
+                self._download_via_soundcloud,
                 self._download_via_jamendo,
                 self._download_via_audius,
-                self._download_via_openverse,
-                self._download_via_soundcloud
+                self._download_via_openverse
             ]
             for method in methods:
                 result = await method(track_info, final_path)
