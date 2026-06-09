@@ -236,17 +236,7 @@ class RadioSession:
     async def _radio_loop(self):
         while self.is_running:
             try:
-                if self.quiz_manager and self.quiz_manager.is_active(self.chat_id):
-                    await asyncio.sleep(2)
-                    continue
-
-                if time.time() - self.last_quiz_time > 3600:
-                    self.last_quiz_time = time.time()
-                    if self.quiz_manager:
-                        logger.info(f"[{self.chat_id}] 🎮 Запуск авто-викторины по таймеру!")
-                        await self.quiz_manager.start_quiz(self.chat_id, self.bot)
-                        await asyncio.sleep(5)
-                        continue
+                start_time = time.time()
                 
                 time_for_rotation = time.time() - self.last_genre_change > 3600
                 too_many_failures = not self.is_temporary_mode and self.failed_downloads_count >= 5
@@ -292,18 +282,20 @@ class RadioSession:
                     await self._update_status("📡 Поиск новой музыки...")
                     self.failed_downloads_count += 1
                     logger.warning(f"[{self.chat_id}] Playlist is empty. Incrementing failure count to {self.failed_downloads_count}.")
-                    await asyncio.sleep(10) # Даем время перед следующей попыткой или сменой жанра
+                    await asyncio.sleep(10)
                     continue
 
                 track = self.playlist.pop(0)
 
                 await self._update_status(f"⬇️ Загрузка: {track.title[:20]}...")
+                
+                logger.info(f"[{self.chat_id}] START DOWNLOAD: {track.title}")
+                download_start = time.time()
+                
                 try:
-                    logger.info(f"[{self.chat_id}] Calling downloader for track: {track.title} ({track.identifier})")
-                    # Таймаут в 3 минуты (180 секунд) на всю операцию скачивания
                     result = await asyncio.wait_for(
                         self.downloader.download(track.identifier, track_info=track),
-                        timeout=180.0
+                        timeout=120.0
                     )
                 except asyncio.TimeoutError:
                     logger.error(f"[{self.chat_id}] TIMEOUT: Download for {track.title} took too long.")
@@ -311,6 +303,8 @@ class RadioSession:
                 except Exception as e:
                     logger.error(f"[{self.chat_id}] UNCAUGHT exception during download call: {e}", exc_info=True)
                     result = None
+                
+                logger.info(f"[{self.chat_id}] END DOWNLOAD: {track.title}. Took: {time.time() - download_start:.2f}s")
                 
                 is_valid_file = False
                 if result and result.success:
@@ -370,17 +364,20 @@ class RadioSession:
                 
                 if success and track.duration > 0:
                     try:
-                        # Wait for track to finish (duration + 5s buffer), or until skip is called
                         await asyncio.wait_for(self.skip_event.wait(), timeout=float(track.duration + 5))
                     except asyncio.TimeoutError:
-                        pass  # This is the expected behavior for a track finishing
-                elif success: # track has no duration, use default
+                        pass
+                elif success:
                     try: await asyncio.wait_for(self.skip_event.wait(), timeout=360.0)
                     except asyncio.TimeoutError: pass
-                else: # Sending failed
+                else:
                     await asyncio.sleep(2)
                 
                 self.skip_event.clear()
+                
+                if time.time() - start_time > 300:
+                    logger.warning(f"[{self.chat_id}] LONG ITERATION: {time.time() - start_time:.2f}s")
+            
             except asyncio.CancelledError: break
             except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await asyncio.sleep(5)
         self.is_running = False
