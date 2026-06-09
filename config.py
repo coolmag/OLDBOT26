@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     PLAYER_URL: str = ""
     ADMIN_IDS: str = ""
     
-    COOKIES_CONTENT: str = ""
+    COOKIES_CONTENT: str = "" # Старая переменная, можно оставить для совместимости или удалить
+    YT_COOKIES: str = ""
+    SC_COOKIES: str = ""
     PO_TOKEN: Optional[str] = None
     VISITOR_DATA: Optional[str] = None
     PROXY_URL: Optional[str] = None

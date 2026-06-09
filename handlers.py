@@ -73,7 +73,8 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
                             title=info.title if info else "Track", 
                             performer=info.artist if info else "Unknown", 
                             duration=info.duration if info else 0,
-                            reply_markup=markup
+                            reply_markup=markup,
+                            write_timeout=300
                         )
                     return 
                 except Exception as e:

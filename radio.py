@@ -398,7 +398,7 @@ class RadioSession:
             audio_source = result.file_path
             
             if result.is_url:
-                await self.bot.send_audio(self.chat_id, audio=audio_source, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=300)
+                await self.bot.send_audio(self.chat_id, audio=audio_source, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=300)
                 await self._delete_status()
                 return True
 
@@ -406,7 +406,7 @@ class RadioSession:
                 cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
                 if cached_file_id:
                     try:
-                        await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=60, write_timeout=300)
+                        await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=300)
                         await self._delete_status()
                         return True
                     except Exception:

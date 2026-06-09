@@ -40,6 +40,19 @@ class YouTubeDownloader:
         self.ytmusic = YTMusic()
         self.http_client = httpx.AsyncClient(timeout=20.0)
 
+        # Динамическое создание файлов кук из переменных окружения
+        self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
+        self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
+
+        if self._settings.YT_COOKIES:
+            with open(self.yt_cookies_path, "w", encoding="utf-8") as f:
+                f.write(self._settings.YT_COOKIES)
+        
+        if self._settings.SC_COOKIES:
+            with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
+                f.write(self._settings.SC_COOKIES)
+
+
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if kwargs.get('decade'): query = f"{query} {kwargs['decade']}"
         if not query or not query.strip(): return []
@@ -176,8 +189,11 @@ class YouTubeDownloader:
         opts = {'format': 'bestaudio/best', 'outtmpl': temp_path_str, 'quiet': True, 'noprogress': True,
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
                 'force_ipv4': True, 'sleep_interval': 3, 'max_sleep_interval': 10, 'retries': 2}
-        sc_cookies = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
-        if sc_cookies.exists(): opts['cookiefile'] = str(sc_cookies)
+        
+        # Выбор нужного файла кук
+        cookie_file = self.yt_cookies_path if "YouTube" in source_name else self.sc_cookies_path
+        if cookie_file.exists(): opts['cookiefile'] = str(cookie_file)
+        
         try:
             logger.info(f"⬇️ [{source_name}] Attempting search and download for: '{url_or_query}'")
             await asyncio.to_thread(yt_dlp.YoutubeDL(opts).download, [url_or_query])
