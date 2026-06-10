@@ -7,10 +7,12 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 class CacheService:
-    def __init__(self):
+    def __init__(self, db_path: Optional[str] = None):
         self.settings = get_settings()
         self.redis_client = None
         self._in_memory_cache = {}
+        # db_path пока не используется, так как SQLite убран, 
+        # но сохраняем для совместимости сигнатуры
         
         if self.settings.REDIS_URL:
             try:
@@ -20,6 +22,14 @@ class CacheService:
                 logger.error(f"❌ Failed to initialize Redis: {e}. Falling back to in-memory cache.")
         else:
             logger.info("ℹ️ Redis URL not provided. Using in-memory cache.")
+
+    async def initialize(self):
+        # Метод для совместимости с жизненным циклом (lifespan)
+        pass
+
+    async def close(self):
+        # Метод для совместимости с жизненным циклом (lifespan)
+        pass
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = 3600):
         if self.redis_client:
@@ -49,6 +59,31 @@ class CacheService:
             except Exception as e:
                 logger.error(f"Redis delete error: {e}")
         self._in_memory_cache.pop(key, None)
+
+    async def hincr(self, name: str, key: str, amount: int = 1):
+        if self.redis_client:
+            try:
+                await self.redis_client.hincrby(name, key, amount)
+            except Exception as e:
+                logger.error(f"Redis hincr error: {e}")
+                # Fallback
+                val = self._in_memory_cache.get(name, {}).get(key, 0)
+                if name not in self._in_memory_cache: self._in_memory_cache[name] = {}
+                self._in_memory_cache[name][key] = val + amount
+        else:
+            val = self._in_memory_cache.get(name, {}).get(key, 0)
+            if name not in self._in_memory_cache: self._in_memory_cache[name] = {}
+            self._in_memory_cache[name][key] = val + amount
+
+    async def hgetall(self, name: str) -> dict:
+        if self.redis_client:
+            try:
+                return await self.redis_client.hgetall(name)
+            except Exception as e:
+                logger.error(f"Redis hgetall error: {e}")
+                return self._in_memory_cache.get(name, {})
+        else:
+            return self._in_memory_cache.get(name, {})
 
 # Глобальный экземпляр для использования в других модулях
 cache_service = CacheService()
