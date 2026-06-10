@@ -138,8 +138,22 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(request: Request):
+    ai_manager = request.app.state.tg_app.ai_manager
+    cache = request.app.state.tg_app.cache
+    
+    # Simple check for AI
+    ai_status = "OK" if ai_manager.providers else "Degraded"
+    
+    # Simple check for Redis
+    redis_status = "Connected" if cache.redis_client else "Disconnected (In-Memory)"
+    
+    return {
+        "status": "ok",
+        "ai_status": ai_status,
+        "redis_status": redis_status,
+        "disk_space": f"{shutil.disk_usage('/').free / (1024**3):.2f} GB free"
+    }
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
