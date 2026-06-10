@@ -18,6 +18,7 @@ from config import Settings
 from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
+from cache_service import cache_service
 from ai_personas import PERSONAS
 
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
@@ -61,20 +62,34 @@ def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     return f"{icon} *{safe_title[:40].strip()}* | 👤 {safe_artist[:30].strip()} | ⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
 def get_random_catalog_query() -> tuple[str, Optional[str], str]:
-    all_queries = []
-    def extract(node):
+    all_items = []
+    
+    # Рекурсивный сбор всех элементов
+    def extract_items(node):
         if isinstance(node, dict):
-            for k, v in node.items():
-                if isinstance(v, dict):
-                    if "query" in v: all_queries.append((v["query"], v.get("decade"), v.get("name", k)))
-                    elif "children" in v: extract(v["children"])
-                elif isinstance(v, list): extract(v)
+            # Если это узел с "query" или "tracks" - это конечный пункт
+            if "query" in node or "tracks" in node:
+                all_items.append((
+                    node.get("query", "top hits"),
+                    node.get("decade"),
+                    node.get("name", "Random")
+                ))
+            # Если есть дети - идем глубже
+            elif "children" in node:
+                extract_items(node["children"])
+            else:
+                # Иначе пробуем пройтись по всем значениям
+                for v in node.values():
+                    extract_items(v)
         elif isinstance(node, list):
             for item in node:
-                if isinstance(item, dict) and "query" in item: all_queries.append((item["query"], item.get("decade"), item.get("name", "Unknown")))
-                elif isinstance(item, dict): extract(item)
-    extract(MUSIC_CATALOG)
-    return random.choice(all_queries) if all_queries else ("top hits", None, "Random")
+                extract_items(item)
+    
+    extract_items(MUSIC_CATALOG)
+    
+    if all_items:
+        return random.choice(all_items)
+    return ("top hits", None, "Random")
 
 
 from quiz_service import QuizManager
@@ -308,7 +323,7 @@ class RadioSession:
                 
                 is_valid_file = False
                 if result and result.success:
-                    if result.is_url or await self.downloader._cache.get(f"file_id:{track.identifier}"):
+                    if result.is_url or await cache_service.get(f"file_id:{track.identifier}"):
                         is_valid_file = True
                     elif result.file_path and Path(result.file_path).exists():
                         file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
@@ -403,14 +418,14 @@ class RadioSession:
                 return True
 
             if not disable_cache:
-                cached_file_id = await self.downloader._cache.get(f"file_id:{track.identifier}")
+                cached_file_id = await cache_service.get(f"file_id:{track.identifier}")
                 if cached_file_id:
                     try:
                         await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=300)
                         await self._delete_status()
                         return True
                     except Exception:
-                        await self.downloader._cache.delete(f"file_id:{track.identifier}")
+                        await cache_service.delete(f"file_id:{track.identifier}")
 
             if audio_source and Path(audio_source).exists():
                 with open(audio_source, 'rb') as f:
@@ -426,7 +441,7 @@ class RadioSession:
                         write_timeout=300
                     )
                     if msg.audio and not disable_cache: 
-                        await self.downloader._cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                        await cache_service.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 
                 await self._delete_status()
                 return True
