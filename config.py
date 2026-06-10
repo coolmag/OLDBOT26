@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_SECRET: Optional[str] = None
     OPENROUTER_API_KEY: str = ""
     JAMENDO_CLIENT_ID: str = ""
-
+    REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)
     
     COBALT_INSTANCES: Union[List[str], str, None] = None
     PIPED_INSTANCES: Union[List[str], str, None] = None
