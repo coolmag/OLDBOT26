@@ -13,6 +13,7 @@ from telegram.ext import (
 )
 
 from ai_personas import PERSONAS
+from cache_service import cache_service
 
 logger = logging.getLogger("handlers")
 
@@ -355,6 +356,19 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = await ai_manager.test_providers()
     await update.message.reply_text(report, parse_mode=ParseMode.MARKDOWN)
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows skip statistics."""
+    stats = await cache_service.hgetall("skip_stats")
+    if not stats:
+        await update.message.reply_text("📊 Статистика пропусков пока пуста.")
+        return
+    
+    text = "📊 *Статистика пропусков (Skip-Analytics):*\n\n"
+    for key, count in stats.items():
+        text += f"- {key}: {count}\n"
+    
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("play", play_command))
@@ -368,6 +382,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("rockdance", rockdance_command))
     app.add_handler(CommandHandler("toprock", toprock_command))
     app.add_handler(CommandHandler("test_ai", test_ai_command))
+    app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))

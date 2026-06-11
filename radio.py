@@ -61,24 +61,20 @@ def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     return f"{icon} *{safe_title[:40].strip()}* | 👤 {safe_artist[:30].strip()} | ⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
-def get_random_catalog_query() -> tuple[str, Optional[str], str]:
+async def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     all_items = []
     
-    # Рекурсивный сбор всех элементов
     def extract_items(node):
         if isinstance(node, dict):
-            # Если это узел с "query" или "tracks" - это конечный пункт
             if "query" in node or "tracks" in node:
                 all_items.append((
                     node.get("query", "top hits"),
                     node.get("decade"),
                     node.get("name", "Random")
                 ))
-            # Если есть дети - идем глубже
             elif "children" in node:
                 extract_items(node["children"])
             else:
-                # Иначе пробуем пройтись по всем значениям
                 for v in node.values():
                     extract_items(v)
         elif isinstance(node, list):
@@ -87,9 +83,23 @@ def get_random_catalog_query() -> tuple[str, Optional[str], str]:
     
     extract_items(MUSIC_CATALOG)
     
-    if all_items:
-        return random.choice(all_items)
-    return ("top hits", None, "Random")
+    if not all_items:
+        return ("top hits", None, "Random")
+
+    # Получаем статистику скипов
+    stats = await cache_service.hgetall("skip_stats")
+    
+    # Вычисляем веса
+    weights = []
+    for item in all_items:
+        display_name = item[2]
+        skip_count = int(stats.get(display_name, 0))
+        # Формула: чем больше скипов, тем меньше вес (минимум 0.1, чтобы не исключать полностью)
+        weight = max(0.1, 1.0 / (1.0 + skip_count))
+        weights.append(weight)
+    
+    # Случайный выбор с весами
+    return random.choices(all_items, weights=weights, k=1)[0]
 
 
 from quiz_service import QuizManager
@@ -114,6 +124,7 @@ class RadioSession:
     playlist: List[TrackInfo] = field(default_factory=list)
     played_ids: Set[str] = field(default_factory=set)
     current_task: Optional[asyncio.Task] = field(init=False, default=None)
+    next_track_task: Optional[asyncio.Task] = field(init=False, default=None)
     skip_event: asyncio.Event = field(default_factory=asyncio.Event)
     status_message: Optional[Message] = field(init=False, default=None)
     _is_searching: bool = field(init=False, default=False)
@@ -151,6 +162,8 @@ class RadioSession:
         logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
 
     async def skip(self):
+        # Логируем скип для текущего жанра
+        await cache_service.hincr("skip_stats", self.display_name)
         self.skip_event.set()
 
     async def set_temporary_query(self, query: str, display_name: str):
@@ -248,6 +261,19 @@ class RadioSession:
             else: self.played_ids.clear()
         self._is_searching = False
 
+    async def _download_track(self, track: TrackInfo) -> Optional[DownloadResult]:
+        try:
+            return await asyncio.wait_for(
+                self.downloader.download(track.identifier, track_info=track),
+                timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[{self.chat_id}] TIMEOUT: Download for {track.title} took too long.")
+            return None
+        except Exception as e:
+            logger.error(f"[{self.chat_id}] UNCAUGHT exception during download call: {e}", exc_info=True)
+            return None
+
     async def _radio_loop(self):
         while self.is_running:
             try:
@@ -263,7 +289,7 @@ class RadioSession:
                     self.is_temporary_mode = False
                     self.failed_downloads_count = 0 
                     
-                    new_query, new_decade, new_display_name = get_random_catalog_query()
+                    new_query, new_decade, new_display_name = await get_random_catalog_query()
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
                     self.last_genre_change = time.time()
@@ -307,19 +333,17 @@ class RadioSession:
                 logger.info(f"[{self.chat_id}] START DOWNLOAD: {track.title}")
                 download_start = time.time()
                 
-                try:
-                    result = await asyncio.wait_for(
-                        self.downloader.download(track.identifier, track_info=track),
-                        timeout=120.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"[{self.chat_id}] TIMEOUT: Download for {track.title} took too long.")
-                    result = None
-                except Exception as e:
-                    logger.error(f"[{self.chat_id}] UNCAUGHT exception during download call: {e}", exc_info=True)
-                    result = None
+                if self.next_track_task:
+                    result = await self.next_track_task
+                    self.next_track_task = None
+                else:
+                    result = await self._download_track(track)
                 
                 logger.info(f"[{self.chat_id}] END DOWNLOAD: {track.title}. Took: {time.time() - download_start:.2f}s")
+                
+                # Запускаем загрузку следующего трека заранее
+                if len(self.playlist) > 0:
+                    self.next_track_task = asyncio.create_task(self._download_track(self.playlist[0]))
                 
                 is_valid_file = False
                 if result and result.success:
@@ -486,7 +510,7 @@ class RadioManager:
                 final_display_name = display_name or query
                 
                 if query == "random": 
-                    random_query, random_decade, random_display_name = get_random_catalog_query()
+                    random_query, random_decade, random_display_name = await get_random_catalog_query()
                     final_query = random_query
                     final_display_name = random_display_name
                     if not decade: decade = random_decade # Обновляем decade, если не задан
@@ -506,7 +530,7 @@ class RadioManager:
             final_decade = decade
 
             if query == "random": 
-                random_query, random_decade, random_display_name = get_random_catalog_query()
+                random_query, random_decade, random_display_name = await get_random_catalog_query()
                 final_query = random_query
                 final_display_name = random_display_name
                 if not final_decade: 

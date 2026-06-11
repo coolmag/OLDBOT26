@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import time
 from typing import Optional
 import httpx
 from google import genai
@@ -11,11 +12,15 @@ logger = logging.getLogger("ai_manager")
 
 class AIManager:
     """
-    🧠 AI Manager (OpenRouter First, Google AI Fallback).
+    🧠 AI Manager (OpenRouter First, Google AI Fallback) with Circuit Breaker.
     """
     def __init__(self, settings: Settings):
         self.settings = settings
         self.providers = []
+        self.failure_tracker = {
+            "OpenRouter": {"count": 0, "blocked_until": 0},
+            "GoogleAI": {"count": 0, "blocked_until": 0}
+        }
         
         # Setup Google AI
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
@@ -37,6 +42,43 @@ class AIManager:
             logger.info(f"✅ ИИ успешно подключен (Основной мозг и логика: OpenRouter, Резерв: Google AI)")
         else:
             logger.error("❌ ВСЕ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
+
+    def _is_blocked(self, provider: str) -> bool:
+        tracker = self.failure_tracker.get(provider)
+        if tracker and time.time() < tracker["blocked_until"]:
+            return True
+        return False
+
+    def _record_failure(self, provider: str):
+        tracker = self.failure_tracker.get(provider)
+        if tracker:
+            tracker["count"] += 1
+            if tracker["count"] >= 3:
+                logger.warning(f"🚫 Blocking provider {provider} for 5 minutes due to multiple failures.")
+                tracker["blocked_until"] = time.time() + 300
+                tracker["count"] = 0
+
+    def _clear_failure(self, provider: str):
+        tracker = self.failure_tracker.get(provider)
+        if tracker:
+            tracker["count"] = 0
+            tracker["blocked_until"] = 0
+
+    async def _get_best_free_model(self) -> str:
+        try:
+            logger.info("📡 Fetching latest free models from OpenRouter...")
+            response = await self.openrouter_client.get("https://openrouter.ai/api/v1/models", timeout=10)
+            data = response.json()
+            # Фильтруем модели с нулевой ценой за prompt
+            free_models = [m['id'] for m in data['data'] if m['pricing']['prompt'] == '0']
+            if free_models:
+                logger.info(f"✅ Found free model: {free_models[0]}")
+                return free_models[0]
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch free models: {e}")
+        
+        # Резервный вариант, если список получить не удалось
+        return "google/gemini-2.0-flash-lite-preview-02-05:free"
 
     async def analyze_message(self, text: str) -> dict:
         prompt = f"""Analyze this user message for a Telegram music bot.
@@ -76,6 +118,7 @@ class AIManager:
         return self._regex_fallback(text)
 
     async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
+        if self._is_blocked("GoogleAI"): return None
         try:
             logger.warning("🔄 Falling back to Gemini Flash for JSON analysis")
             response = self.gemini_client.models.generate_content(
@@ -83,14 +126,17 @@ class AIManager:
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
+            self._clear_failure("GoogleAI")
             return self._parse_json(response.text)
         except Exception as e:
             logger.error(f"❌ Flash API error (JSON): {e}")
+            self._record_failure("GoogleAI")
             return None
     
     async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
         if not self.settings.OPENROUTER_API_KEY: return None
-        logger.info("🔄 Trying OpenRouter for JSON analysis...")
+        model = await self._get_best_free_model()
+        logger.info(f"🔄 Trying OpenRouter for JSON analysis using {model}...")
         try:
             response = await self.openrouter_client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -100,7 +146,7 @@ class AIManager:
                     "X-Title": "Aurora AI DJ"
                 },
                 json={
-                    "model": "nousresearch/nous-hermes-2-mixtral-8x7b-dpo",
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "response_format": {"type": "json_object"}
                 },
@@ -135,18 +181,18 @@ class AIManager:
 User: {prompt}"""
         
         # --- Level 1: OpenRouter (Primary) ---
-        if "OpenRouter" in self.providers:
+        if "OpenRouter" in self.providers and not self._is_blocked("OpenRouter"):
             try:
                 logger.info("🔄 Trying OpenRouter for Chat...")
                 response = await self._call_openrouter(full_prompt)
                 if response:
                     return response
-                raise Exception("OpenRouter returned None")
+                # Если OpenRouter вернул None или пустой ответ, считаем это ошибкой (или просто идем дальше)
             except Exception as e:
                 logger.error(f"❌ OpenRouter (Primary) failed: {e}")
 
         # --- Level 2: Google AI (Gemma 4 Fallback) ---
-        if "GoogleAI" in self.providers:
+        if "GoogleAI" in self.providers and not self._is_blocked("GoogleAI"):
             try:
                 logger.warning("🔄 Falling back to Gemma 4 for Chat")
                 response = self.gemini_client.models.generate_content(
@@ -154,10 +200,12 @@ User: {prompt}"""
                     contents=full_prompt,
                     config=types.GenerateContentConfig(temperature=0.9)
                 )
+                self._clear_failure("GoogleAI")
                 logger.info("💬 Gemma 4 e2b (Chat) responded.")
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Gemma 4 fallback failed: {e}")
+                self._record_failure("GoogleAI")
                     
             # --- Level 3: Google AI (Flash Fallback) ---
             try:
@@ -167,14 +215,16 @@ User: {prompt}"""
                     contents=full_prompt, 
                     config=types.GenerateContentConfig(temperature=0.9)
                 )
+                self._clear_failure("GoogleAI")
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Flash fallback failed: {e}")
+                self._record_failure("GoogleAI")
 
         return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
 
     async def _call_openrouter(self, full_prompt: str) -> Optional[str]:
-        if not self.settings.OPENROUTER_API_KEY: return None
+        if not self.settings.OPENROUTER_API_KEY or self._is_blocked("OpenRouter"): return None
         
         try:
             response = await self.openrouter_client.post(
@@ -195,11 +245,14 @@ User: {prompt}"""
             response.raise_for_status()
             data = response.json()
             logger.info("💬 OpenRouter (DeepSeek V4 Flash) responded.")
+            self._clear_failure("OpenRouter")
             return data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
             logger.error(f"OpenRouter HTTP Error: {e.response.status_code} - {e.response.text}")
+            self._record_failure("OpenRouter")
         except Exception as e:
             logger.error(f"OpenRouter call failed: {e}")
+            self._record_failure("OpenRouter")
         return None
 
     async def test_providers(self) -> str:

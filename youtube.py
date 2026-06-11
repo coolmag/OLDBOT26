@@ -129,6 +129,23 @@ class YouTubeDownloader:
     async def _download_direct_http(self, audio_url: str, target_path: Path, source_name: str) -> DownloadResult:
         temp_path = target_path.with_suffix('.part')
         try:
+            # --- START: Pre-download size check ---
+            try:
+                async with self.http_client.stream("HEAD", audio_url, follow_redirects=True) as head_response:
+                    if head_response.status_code == 200:
+                        content_length = head_response.headers.get('Content-Length')
+                        if content_length:
+                            file_size_mb = int(content_length) / (1024 * 1024)
+                            # This range should match the one in radio.py (1.0 MB to 20.0 MB)
+                            if not (1.0 <= file_size_mb <= 20.0):
+                                logger.warning(f"⚠️ [{source_name}] Rejected before download due to size: {file_size_mb:.2f} MB")
+                                return DownloadResult(success=False, error_message=f"File size {file_size_mb:.2f} MB is out of range.")
+                    else:
+                        logger.warning(f"⚠️ [{source_name}] HEAD request failed with status {head_response.status_code}, proceeding with download...")
+            except Exception as e:
+                logger.warning(f"⚠️ [{source_name}] HEAD request for size check failed ({e}), proceeding with download...")
+            # --- END: Pre-download size check ---
+
             async with self.http_client.stream("GET", audio_url, follow_redirects=True) as response:
                 response.raise_for_status()
                 with open(temp_path, "wb") as f:
