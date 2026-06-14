@@ -98,16 +98,22 @@ class YouTubeDownloader:
             track_info = await self._get_track_info_from_cache(video_id) or await self._get_track_info_from_ytmusic(video_id)
             if not track_info: return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
+        await self._cleanup_old_downloads()
+
         async with self.semaphore:
-            # Pipeline: SoundCloud -> Audius -> Jamendo -> InternetArchive
-            # These are supplemental and optimized to fail fast if they can't find the track.
+            # Pipeline: SoundCloud -> Audius -> InternetArchive -> Jamendo
             methods = [
                 self._download_via_soundcloud,
                 self._download_via_audius,
-                self._download_via_jamendo,
-                self._download_via_internet_archive
+                self._download_via_internet_archive,
+                self._download_via_jamendo
             ]
             for method in methods:
+                # Специальная проверка для Jamendo
+                if method.__name__ == "_download_via_jamendo" and not self._settings.JAMENDO_CLIENT_ID:
+                    logger.warning("⚠️ Jamendo skipped: no client_id configured.")
+                    continue
+
                 logger.info(f"🚀 Trying {method.__name__}...")
                 result = await method(track_info, final_path)
                 if result.success:
@@ -116,6 +122,24 @@ class YouTubeDownloader:
                 logger.warning(f"⚠️ {method.__name__} failed.")
         
         return DownloadResult(success=False, error_message="All download methods failed")
+
+    async def _cleanup_old_downloads(self, limit_mb: int = 400):
+        """Cleans up old files if downloads directory exceeds limit."""
+        files = sorted(list(self._settings.DOWNLOADS_DIR.glob("*.mp3")), key=lambda f: f.stat().st_mtime)
+        total_size = sum(f.stat().st_size for f in files)
+        
+        if total_size > limit_mb * 1024 * 1024:
+            logger.info(f"🧹 Cache cleanup: total size {total_size/(1024*1024):.2f} MB exceeds {limit_mb} MB. Cleaning up...")
+            for file in files:
+                if total_size <= limit_mb * 1024 * 1024 * 0.8: # Free up to 80% of limit
+                    break
+                try:
+                    file_size = file.stat().st_size
+                    file.unlink()
+                    total_size -= file_size
+                    logger.info(f"🗑️ Deleted old file: {file.name}")
+                except Exception as e:
+                    logger.error(f"Failed to delete {file.name}: {e}")
 
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
         min_dur = getattr(self._settings, 'TRACK_MIN_DURATION_S', 60)
@@ -247,8 +271,18 @@ class YouTubeDownloader:
                 'force_ipv4': True, 'sleep_interval': 3, 'max_sleep_interval': 10, 'retries': 2}
         
         # Выбор нужного файла кук
-        cookie_file = self.yt_cookies_path if "YouTube" in source_name else self.sc_cookies_path
-        if cookie_file.exists(): opts['cookiefile'] = str(cookie_file)
+        if source_name == "SoundCloud":
+            cookie_file = self.sc_cookies_path
+        elif "YouTube" in source_name:
+            cookie_file = self.yt_cookies_path
+        else:
+            cookie_file = None
+
+        if cookie_file and cookie_file.exists():
+            opts['cookiefile'] = str(cookie_file)
+            logger.info(f"🍪 [{source_name}] Using cookies file: {cookie_file.name}")
+        else:
+            logger.warning(f"⚠️ [{source_name}] Cookies file not found or not used: {cookie_file}")
         
         try:
             logger.info(f"⬇️ [{source_name}] Attempting search and download for: '{url_or_query}'")
