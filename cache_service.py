@@ -11,8 +11,7 @@ class CacheService:
         self.settings = get_settings()
         self.redis_client = None
         self._in_memory_cache = {}
-        # db_path пока не используется, так как SQLite убран, 
-        # но сохраняем для совместимости сигнатуры
+        self._max_cache_size = 500 # Лимит записей
         
         if self.settings.REDIS_URL:
             try:
@@ -24,11 +23,9 @@ class CacheService:
             logger.info("ℹ️ Redis URL not provided. Using in-memory cache.")
 
     async def initialize(self):
-        # Метод для совместимости с жизненным циклом (lifespan)
         pass
 
     async def close(self):
-        # Метод для совместимости с жизненным циклом (lifespan)
         pass
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = 3600):
@@ -37,9 +34,16 @@ class CacheService:
                 await self.redis_client.set(key, json.dumps(value), ex=ttl)
             except Exception as e:
                 logger.error(f"Redis set error: {e}")
-                self._in_memory_cache[key] = value
+                self._add_to_memory_cache(key, value)
         else:
-            self._in_memory_cache[key] = value
+            self._add_to_memory_cache(key, value)
+
+    def _add_to_memory_cache(self, key: str, value: Any):
+        if len(self._in_memory_cache) >= self._max_cache_size:
+            # Удаляем самый старый элемент (первый ключ в словаре в Python 3.7+)
+            oldest_key = next(iter(self._in_memory_cache))
+            self._in_memory_cache.pop(oldest_key)
+        self._in_memory_cache[key] = value
 
     async def get(self, key: str) -> Optional[Any]:
         if self.redis_client:

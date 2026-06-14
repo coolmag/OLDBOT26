@@ -58,26 +58,34 @@ class YouTubeDownloader:
         if not query or not query.strip(): return []
         logger.info(f"🔎 YTMusic Search: {query}")
         loop = asyncio.get_running_loop()
+        
+        # Попытка поиска с фильтром
         try:
             search_results = await loop.run_in_executor(None, lambda: self.ytmusic.search(query, filter="songs", limit=limit))
-            results = []
-            for item in search_results:
-                video_id = item.get('videoId')
-                if not video_id: continue
-                artists = ", ".join([a['name'] for a in item.get('artists', [])])
-                duration_text = item.get('duration', '0:00')
-                try:
-                    parts = duration_text.split(':')
-                    duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-                except: duration = 0
-                if not (self._settings.TRACK_MIN_DURATION_S <= duration <= self._settings.TRACK_MAX_DURATION_S): continue
-                track = TrackInfo(identifier=video_id, title=item.get('title'), duration=duration, uploader=artists,
-                                  thumbnail_url=item.get('thumbnails', [{}])[-1].get('url'), source=Source.YTMUSIC)
-                results.append(track)
-            return results
         except Exception as e:
-            logger.error(f"❌ YTMusic Search error: {e}", exc_info=True)
-            return []
+            logger.warning(f"⚠️ YTMusic Search with filter failed, trying without filter: {e}")
+            # Попытка поиска без фильтра
+            try:
+                search_results = await loop.run_in_executor(None, lambda: self.ytmusic.search(query, limit=limit))
+            except Exception as e2:
+                logger.error(f"❌ YTMusic Search completely failed: {e2}", exc_info=True)
+                return []
+
+        results = []
+        for item in search_results:
+            video_id = item.get('videoId')
+            if not video_id: continue
+            artists = ", ".join([a['name'] for a in item.get('artists', [])])
+            duration_text = item.get('duration', '0:00')
+            try:
+                parts = duration_text.split(':')
+                duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
+            except: duration = 0
+            if not (self._settings.TRACK_MIN_DURATION_S <= duration <= self._settings.TRACK_MAX_DURATION_S): continue
+            track = TrackInfo(identifier=video_id, title=item.get('title'), duration=duration, uploader=artists,
+                              thumbnail_url=item.get('thumbnails', [{}])[-1].get('url'), source=Source.YTMUSIC)
+            results.append(track)
+        return results
 
     async def download(self, video_id: str, track_info: Optional[TrackInfo] = None) -> DownloadResult:
         final_path = self._settings.DOWNLOADS_DIR / f"{video_id}.mp3"
