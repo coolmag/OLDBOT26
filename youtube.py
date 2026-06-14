@@ -99,17 +99,21 @@ class YouTubeDownloader:
             if not track_info: return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
+            # Pipeline: SoundCloud -> Audius -> Jamendo -> InternetArchive
+            # These are supplemental and optimized to fail fast if they can't find the track.
             methods = [
                 self._download_via_soundcloud,
-                self._download_via_jamendo,
                 self._download_via_audius,
-                self._download_via_openverse
+                self._download_via_jamendo,
+                self._download_via_internet_archive
             ]
             for method in methods:
+                logger.info(f"🚀 Trying {method.__name__}...")
                 result = await method(track_info, final_path)
                 if result.success:
                     result.track_info = track_info
                     return result
+                logger.warning(f"⚠️ {method.__name__} failed.")
         
         return DownloadResult(success=False, error_message="All download methods failed")
 
@@ -207,6 +211,33 @@ class YouTubeDownloader:
         audio_url = await self.openverse.search_track_url(query)
         if audio_url: return await self._download_direct_http(audio_url, target_path, "Openverse")
         return DownloadResult(success=False)
+
+    async def _download_via_internet_archive(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting download via Internet Archive (Fallback)...")
+        # IA API search is complex. Simple approach: query by title + artist.
+        query = f"{track_info.uploader} {track_info.title}".replace(' ', '+')
+        try:
+            # IA search API
+            resp = await self.http_client.get(f"https://archive.org/advancedsearch.php?q={query}&fl[]=identifier&fl[]=title&output=json&rows=1")
+            resp.raise_for_status()
+            data = resp.json().get("response", {}).get("docs", [])
+            if not data: return DownloadResult(success=False)
+            
+            identifier = data[0]['identifier']
+            # Get files for this identifier
+            files_resp = await self.http_client.get(f"https://archive.org/metadata/{identifier}/files")
+            files_resp.raise_for_status()
+            files = files_resp.json().get("result", [])
+            
+            # Find mp3
+            mp3_file = next((f for f in files if f['name'].endswith('.mp3')), None)
+            if not mp3_file: return DownloadResult(success=False)
+            
+            audio_url = f"https://archive.org/download/{identifier}/{mp3_file['name']}"
+            return await self._download_direct_http(audio_url, target_path, "InternetArchive")
+        except Exception as e:
+            logger.error(f"Internet Archive download pipeline failed: {e}")
+            return DownloadResult(success=False)
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
         temp_path_str = str(target_path).replace(".mp3", f"_{source_name}_temp")

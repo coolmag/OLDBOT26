@@ -369,6 +369,25 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
+async def disk_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Checks disk usage of downloads directory."""
+    downloads_dir = context.application.settings.DOWNLOADS_DIR
+    if not downloads_dir.exists():
+        await update.message.reply_text("📁 Папка загрузок еще не создана.")
+        return
+
+    files = list(downloads_dir.glob("*.mp3"))
+    total_size = sum(f.stat().st_size for f in files)
+    total_size_mb = total_size / (1024 * 1024)
+    
+    await update.message.reply_text(
+        f"💾 *Статистика диска:*\n"
+        f"- Путь: `{downloads_dir}`\n"
+        f"- Файлов: {len(files)}\n"
+        f"- Занято: {total_size_mb:.2f} MB",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("play", play_command))
@@ -383,6 +402,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("toprock", toprock_command))
     app.add_handler(CommandHandler("test_ai", test_ai_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("disk", disk_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))
