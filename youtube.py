@@ -2,7 +2,7 @@ import asyncio
 import logging
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import yt_dlp
 from ytmusicapi import YTMusic
@@ -10,24 +10,20 @@ from ytmusicapi import YTMusic
 from config import Settings
 from models import DownloadResult, TrackInfo, Source
 from cache_service import CacheService
+from db_service import DatabaseService
 
 logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
-    def __init__(self, settings: Settings, cache_service: CacheService, db_service, event_bus):
+    def __init__(self, settings: Settings, cache_service: CacheService, db_service: DatabaseService, event_bus):
         self._settings = settings
         self._cache = cache_service
         self._db = db_service
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
         self.ytmusic = YTMusic()
         
-        self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
-        self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
-
-        if self._settings.YT_COOKIES:
-            with open(self.yt_cookies_path, "w", encoding="utf-8") as f: f.write(self._settings.YT_COOKIES)
-        if self._settings.SC_COOKIES:
-            with open(self.sc_cookies_path, "w", encoding="utf-8") as f: f.write(self._settings.SC_COOKIES)
+        self.yt_cookies_path = Path("/app/youtube_cookies.txt")
+        self.sc_cookies_path = Path("/app/soundcloud_cookies.txt")
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if not query or not query.strip(): return []
@@ -38,13 +34,8 @@ class YouTubeDownloader:
                 video_id = item.get('videoId')
                 if not video_id: continue
                 artists = ", ".join([a['name'] for a in item.get('artists', [])])
-                duration_text = item.get('duration', '0:00')
-                try:
-                    parts = duration_text.split(':')
-                    duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-                except: duration = 0
-                track = TrackInfo(identifier=video_id, title=item.get('title'), duration=duration, uploader=artists,
-                                  thumbnail_url=item.get('thumbnails', [{}])[-1].get('url'), source=Source.YTMUSIC)
+                track = TrackInfo(identifier=video_id, title=item.get('title'), duration=0, uploader=artists,
+                                  source=Source.YTMUSIC)
                 results.append(track)
             return results
         except Exception as e:
@@ -56,32 +47,16 @@ class YouTubeDownloader:
         if final_path.exists():
             return DownloadResult(success=True, file_path=final_path, track_info=track_info)
 
-        if not track_info:
-            track_info = await self._db.get_track(video_id)
-            if not track_info: return DownloadResult(success=False, error_message="No track info")
-
-        # Приоритет: SoundCloud -> YouTube
-        for method in [self._download_via_soundcloud, self._download_via_youtube]:
-            result = await method(track_info, final_path)
-            if result.success:
-                result.track_info = track_info
-                return result
-        
-        await self._cache.record_failure(video_id)
-        return DownloadResult(success=False, error_message="All download methods failed")
-
-    async def _download_via_youtube(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
-        return await self._download_with_yt_dlp(f"https://www.youtube.com/watch?v={track_info.identifier}", target_path, self.yt_cookies_path)
-
-    async def _download_via_soundcloud(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
-        return await self._download_with_yt_dlp(f"scsearch1:{track_info.uploader} - {track_info.title}", target_path, self.sc_cookies_path)
+        # Прямое скачивание без пре-проверок, которые триггерят DRM
+        return await self._download_with_yt_dlp(f"https://www.youtube.com/watch?v={video_id}", final_path, self.yt_cookies_path)
 
     async def _download_with_yt_dlp(self, url: str, target_path: Path, cookie_path: Path) -> DownloadResult:
         temp_path = target_path.with_suffix('.mp3')
         opts = {
             'format': 'bestaudio/best', 'outtmpl': str(temp_path), 'quiet': True, 'noprogress': True,
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'js_runtimes': 'deno'
         }
         if cookie_path.exists(): opts['cookiefile'] = str(cookie_path)
         
