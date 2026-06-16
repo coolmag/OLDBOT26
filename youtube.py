@@ -3,6 +3,7 @@ import logging
 import subprocess
 import difflib
 import time
+import random
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -14,6 +15,7 @@ from config import Settings
 from models import DownloadResult, TrackInfo, Source
 from cache_service import CacheService
 from db_service import DatabaseService
+from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -37,56 +39,24 @@ class YouTubeDownloader:
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if not query or not query.strip(): return []
-        
-        # 1. Попытка через YTMusicAPI
-        logger.info(f"🔎 YTMusic Search: {query}")
         try:
             search_results = await asyncio.to_thread(self.ytmusic.search, query, filter="songs", limit=limit)
-            results = self._parse_ytmusic_results(search_results, query)
-            if results: return results
-        except Exception as e:
-            logger.warning(f"⚠️ YTMusic Search failed: {e}")
-
-        # 2. Фолбэк через Piped API
-        logger.info(f"🔄 Falling back to Piped API search: {query}")
-        return await self._search_via_piped(query, limit)
-
-    def _parse_ytmusic_results(self, search_results, query) -> List[TrackInfo]:
-        results = []
-        for item in search_results:
-            video_id = item.get('videoId')
-            if not video_id: continue
-            
-            title = item.get('title', '')
-            similarity = difflib.SequenceMatcher(None, query.lower(), title.lower()).ratio()
-            if similarity < 0.2: continue
-
-            artists = ", ".join([a['name'] for a in item.get('artists', [])])
-            duration_text = item.get('duration', '0:00')
-            try:
-                parts = duration_text.split(':')
-                duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-            except: duration = 0
-            if not (self._settings.TRACK_MIN_DURATION_S <= duration <= self._settings.TRACK_MAX_DURATION_S): continue
-            
-            track = TrackInfo(identifier=video_id, title=item.get('title'), duration=duration, uploader=artists,
-                              thumbnail_url=item.get('thumbnails', [{}])[-1].get('url'), source=Source.YTMUSIC)
-            results.append(track)
-        return results
-
-    async def _search_via_piped(self, query: str, limit: int) -> List[TrackInfo]:
-        try:
-            resp = await self.http_client.get(f"https://pipedapi.kavin.rocks/search?q={query}&filter=songs")
-            resp.raise_for_status()
-            data = resp.json()
             results = []
-            for item in data.get("items", [])[:limit]:
-                track = TrackInfo(identifier=item['videoId'], title=item['title'], uploader=item.get('uploaderName', 'Unknown'),
-                                  source=Source.YOUTUBE, duration=0)
+            for item in search_results:
+                video_id = item.get('videoId')
+                if not video_id: continue
+                artists = ", ".join([a['name'] for a in item.get('artists', [])])
+                duration_text = item.get('duration', '0:00')
+                try:
+                    parts = duration_text.split(':')
+                    duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
+                except: duration = 0
+                track = TrackInfo(identifier=video_id, title=item.get('title'), duration=duration, uploader=artists,
+                                  source=Source.YTMUSIC)
                 results.append(track)
             return results
         except Exception as e:
-            logger.error(f"❌ Piped search failed: {e}")
+            logger.error(f"Search failed: {e}")
             return []
 
     async def download(self, video_id: str, track_info: Optional[TrackInfo] = None) -> DownloadResult:
@@ -98,15 +68,19 @@ class YouTubeDownloader:
         if final_path.exists():
             return DownloadResult(success=True, file_path=final_path, track_info=track_info)
 
-        async with self.semaphore:
-            for method in [self._download_via_soundcloud, self._download_via_youtube]:
-                result = await method(track_info, final_path)
-                if result.success:
-                    result.track_info = track_info
-                    return result
+        if not track_info:
+            track_info = await self._db.get_track(video_id)
+            if not track_info: return DownloadResult(success=False, error_message="No track info")
+
+        # Приоритет: SoundCloud -> YouTube
+        for method in [self._download_via_soundcloud, self._download_via_youtube]:
+            result = await method(track_info, final_path)
+            if result.success:
+                result.track_info = track_info
+                return result
         
-        self.fail_cooldown[video_id] = time.time()
-        return DownloadResult(success=False, error_message="All methods failed")
+        await self._cache.record_failure(video_id)
+        return DownloadResult(success=False, error_message="All download methods failed")
 
     async def _download_via_youtube(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         return await self._download_with_yt_dlp(f"https://www.youtube.com/watch?v={track_info.identifier}", target_path, self.yt_cookies_path)
