@@ -32,30 +32,24 @@ class YouTubeDownloader:
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
         self.semaphore = asyncio.Semaphore(1)
         self.ytmusic = YTMusic()
-        self.http_client = httpx.AsyncClient(timeout=20.0)
+        self.http_client = httpx.AsyncClient(timeout=30.0)
         
-        # Стоп-лист для треков, которые не качаются (защита от банов)
         self.fail_cooldown = {}
-
         self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
         self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
 
         if self._settings.YT_COOKIES:
-            with open(self.yt_cookies_path, "w", encoding="utf-8") as f:
-                f.write(self._settings.YT_COOKIES)
-        
+            with open(self.yt_cookies_path, "w", encoding="utf-8") as f: f.write(self._settings.YT_COOKIES)
         if self._settings.SC_COOKIES:
-            with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
-                f.write(self._settings.SC_COOKIES)
+            with open(self.sc_cookies_path, "w", encoding="utf-8") as f: f.write(self._settings.SC_COOKIES)
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if kwargs.get('decade'): query = f"{query} {kwargs['decade']}"
         if not query or not query.strip(): return []
         logger.info(f"🔎 YTMusic Search: {query}")
-        loop = asyncio.get_running_loop()
         
         try:
-            search_results = await loop.run_in_executor(None, lambda: self.ytmusic.search(query, filter="songs", limit=limit))
+            search_results = await asyncio.to_thread(self.ytmusic.search, query, filter="songs", limit=limit)
         except Exception as e:
             logger.warning(f"⚠️ YTMusic Search failed: {e}")
             return []
@@ -83,7 +77,9 @@ class YouTubeDownloader:
         return results
 
     async def download(self, video_id: str, track_info: Optional[TrackInfo] = None) -> DownloadResult:
-        # Проверка стоп-листа (защита от банов)
+        # Задержка для маскировки бота
+        await asyncio.sleep(random.uniform(5, 15))
+
         if video_id in self.fail_cooldown and (time.time() - self.fail_cooldown[video_id] < 3600):
             return DownloadResult(success=False, error_message="Cooldown: track failed recently")
 
@@ -96,7 +92,6 @@ class YouTubeDownloader:
             if not track_info: return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # Приоритет: YouTube -> SoundCloud -> Audius -> InternetArchive -> Jamendo
             methods = [
                 self._download_via_youtube,
                 self._download_via_soundcloud,
@@ -115,7 +110,6 @@ class YouTubeDownloader:
                     await self._cache.record_failure(video_id)
                     logger.warning(f"⚠️ {method.__name__} failed for {video_id}.")
         
-        # Если все методы провалились, фиксируем трек в стоп-лист на час
         self.fail_cooldown[video_id] = time.time()
         return DownloadResult(success=False, error_message="All download methods failed")
 
@@ -131,36 +125,34 @@ class YouTubeDownloader:
         except Exception as e: return False, f"ffprobe failed: {e}"
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
-        opts_sim = {'quiet': True, 'simulate': True, 'force_ipv4': True}
+        opts_sim = {
+            'quiet': True, 'simulate': True, 'force_ipv4': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'js_runtimes': 'deno'
+        }
         if source_name == "SoundCloud": opts_sim['cookiefile'] = str(self.sc_cookies_path)
         elif "YouTube" in source_name: opts_sim['cookiefile'] = str(self.yt_cookies_path)
 
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(opts_sim).extract_info(url_or_query, download=False))
-            duration = info.get('duration', 0)
-            if duration < self._settings.TRACK_MIN_DURATION_S:
-                return DownloadResult(success=False, error_message="Preview detected")
-            if info.get('is_live'): return DownloadResult(success=False, error_message="Live stream")
-        except Exception as e:
-            return DownloadResult(success=False, error_message=str(e))
+            if info.get('duration', 0) < self._settings.TRACK_MIN_DURATION_S: return DownloadResult(success=False, error_message="Preview detected")
+        except Exception as e: return DownloadResult(success=False, error_message=str(e))
 
-        temp_path_str = str(target_path).replace(".mp3", f"_{source_name}_temp")
-        opts = {'format': 'bestaudio/best', 'outtmpl': temp_path_str, 'quiet': True, 'noprogress': True,
+        opts = {'format': 'bestaudio/best', 'outtmpl': str(target_path).replace(".mp3", f"_{source_name}_temp"), 'quiet': True, 'noprogress': True,
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                'force_ipv4': True}
+                'force_ipv4': True, 'user_agent': opts_sim['user_agent'], 'js_runtimes': 'deno'}
         if source_name == "SoundCloud": opts['cookiefile'] = str(self.sc_cookies_path)
         elif "YouTube" in source_name: opts['cookiefile'] = str(self.yt_cookies_path)
         
         try:
             await asyncio.to_thread(yt_dlp.YoutubeDL(opts).download, [url_or_query])
-            final_temp_path = Path(temp_path_str + ".mp3")
-            if not final_temp_path.exists(): raise FileNotFoundError("Download failed")
+            final_temp_path = Path(str(target_path).replace(".mp3", f"_{source_name}_temp.mp3"))
             
+            if not final_temp_path.exists(): raise FileNotFoundError("Download failed")
             valid, msg = await asyncio.to_thread(self._validate_audio, final_temp_path)
             if not valid:
                 final_temp_path.unlink()
                 return DownloadResult(success=False, error_message=msg)
-
             final_temp_path.rename(target_path)
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:

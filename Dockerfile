@@ -1,28 +1,20 @@
-# Этап 1: Базовый образ с Python
-FROM python:3.11-slim
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 
-# Устанавливаем рабочую директорию внутри контейнера
+# Установка Python, FFmpeg, Node.js и Deno
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip ffmpeg curl unzip nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Установка Deno
+RUN curl -fsSL https://deno.land/x/install/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+
 WORKDIR /app
-
-# Обновляем список пакетов и устанавливаем FFmpeg
-# RUN apt-get update говорит системе обновить список доступных пакетов
-# RUN apt-get install -y ffmpeg устанавливает сам FFmpeg. Ключ -y автоматически отвечает "да" на все запросы.
-RUN apt-get update && apt-get install -y ffmpeg nodejs
-
-# Копируем файл с зависимостями в контейнер
 COPY requirements.txt .
+# Установка PyTorch с поддержкой CUDA
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN pip install -r requirements.txt
 
-# Устанавливаем зависимости
-# Мы используем --no-cache-dir, чтобы не хранить лишние файлы и уменьшить размер образа
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Копируем весь остальной код проекта в контейнер
 COPY . .
 
-# Открываем порт, на котором будет работать бот. 
-# Yandex Serverless Containers ожидают, что приложение будет слушать порт 8080.
-EXPOSE 8080
-
-# Команда для запуска приложения при старте контейнера
-# Запускаем uvicorn, чтобы он слушал все входящие подключения на порту 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "main.py"]
