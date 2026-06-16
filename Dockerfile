@@ -9,7 +9,8 @@ ENV PATH="/root/.deno/bin:${PATH}"
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Принудительное обновление yt-dlp для борьбы с частыми блокировками
+RUN pip install --no-cache-dir -r requirements.txt && pip install -U yt-dlp
 
 COPY . .
 
