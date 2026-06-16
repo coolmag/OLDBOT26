@@ -204,34 +204,8 @@ class RadioSession:
             except: pass
             self.status_message = None
 
-    async def _prefetcher_loop(self):
-        """Фоновая задача для предварительной загрузки треков в очередь."""
-        while self.is_running:
-            try:
-                if self.downloaded_queue.full():
-                    await asyncio.sleep(5)
-                    continue
-
-                if len(self.playlist) < 3:
-                    await self._fill_playlist()
-                
-                if not self.playlist:
-                    await asyncio.sleep(5)
-                    continue
-
-                track = self.playlist.pop(0)
-                result = await self._download_track(track)
-
-                if result and result.success:
-                    await self.downloaded_queue.put((track, result))
-                else:
-                    self.failed_downloads_count += 1
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"[{self.chat_id}] Prefetcher error: {e}", exc_info=True)
-                await asyncio.sleep(10)
-        if self._is_searching or not self.is_running: return
+    async def _fill_playlist(self, retry_query=None):
+        if self._is_searching: return
         self._is_searching = True
 
         # START of new playlist logic
@@ -241,20 +215,16 @@ class RadioSession:
                 if genre.get("name") == self.display_name:
                     genre_node = genre
                     break
-            if genre_node:
-                break
+            if genre_node: break
         
         if genre_node and "tracks" in genre_node:
             logger.info(f"[{self.chat_id}] 🎶 Filling playlist from static list: {self.display_name}")
-            
-            # Берем случайные 15 треков из списка, если он большой, или все, если маленький
             sample_size = min(15, len(genre_node["tracks"]))
             track_names_to_search = random.sample(genre_node["tracks"], sample_size)
             
             found_tracks = []
             for track_name in track_names_to_search:
                 try:
-                    # Ищем каждый трек отдельно, чтобы получить TrackInfo
                     search_results = await self.downloader.search(track_name, limit=1)
                     if search_results:
                         track_info = search_results[0]
@@ -295,6 +265,34 @@ class RadioSession:
                 self.played_ids = set(list(self.played_ids)[-10:])
             else: self.played_ids.clear()
         self._is_searching = False
+
+    async def _prefetcher_loop(self):
+        """Фоновая задача для предварительной загрузки треков в очередь."""
+        while self.is_running:
+            try:
+                if self.downloaded_queue.full():
+                    await asyncio.sleep(5)
+                    continue
+
+                if len(self.playlist) < 3:
+                    await self._fill_playlist()
+                
+                if not self.playlist:
+                    await asyncio.sleep(5)
+                    continue
+
+                track = self.playlist.pop(0)
+                result = await self._download_track(track)
+
+                if result and result.success:
+                    await self.downloaded_queue.put((track, result))
+                else:
+                    self.failed_downloads_count += 1
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[{self.chat_id}] Prefetcher error: {e}", exc_info=True)
+                await asyncio.sleep(10)
 
     async def _download_track(self, track: TrackInfo) -> Optional[DownloadResult]:
         try:
