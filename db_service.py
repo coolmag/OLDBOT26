@@ -1,4 +1,6 @@
 import aiosqlite
+from typing import Optional, List  # <-- Добавь Optional сюда
+import sqlite3
 from pathlib import Path
 from models import TrackInfo, Source
 
