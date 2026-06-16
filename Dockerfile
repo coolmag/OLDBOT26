@@ -1,8 +1,8 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+FROM python:3.11-slim
 
-# Установка Python, FFmpeg, Node.js и Deno
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip ffmpeg curl unzip nodejs npm \
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg curl unzip nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка Deno
@@ -11,9 +11,11 @@ ENV PATH="/root/.deno/bin:${PATH}"
 
 WORKDIR /app
 COPY requirements.txt .
-# Установка PyTorch с поддержкой CUDA
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-RUN pip install -r requirements.txt
+
+# Установка PyTorch (CPU-версия)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Установка остальных зависимостей
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
