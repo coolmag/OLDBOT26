@@ -15,6 +15,8 @@ from models import DownloadResult, TrackInfo, Source
 from cache_service import CacheService
 from jamendo import JamendoClient
 from openverse import OpenverseClient
+from db_service import DatabaseService
+from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,11 @@ class YouTubeDownloader:
     4. SoundCloud (yt-dlp search, reserve)
     """
 
-    def __init__(self, settings: Settings, cache_service: CacheService):
+    def __init__(self, settings: Settings, cache_service: CacheService, db_service: DatabaseService, event_bus: EventBus):
         self._settings = settings
         self._cache = cache_service
+        self._db = db_service
+        self._event_bus = event_bus
         self.jamendo = JamendoClient(settings.JAMENDO_CLIENT_ID)
         self.openverse = OpenverseClient()
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
@@ -263,12 +267,40 @@ class YouTubeDownloader:
             logger.error(f"Internet Archive download pipeline failed: {e}")
             return DownloadResult(success=False)
 
+    async def _check_drm(self, url_or_query: str, source_name: str) -> bool:
+        """
+        Предварительная проверка на DRM с помощью yt-dlp --simulate.
+        """
+        # Упрощенные опции для симуляции
+        opts = {
+            'quiet': True,
+            'simulate': True,
+            'format': 'bestaudio/best',
+            'force_ipv4': True
+        }
+        if source_name == "SoundCloud":
+            opts['cookiefile'] = str(self.sc_cookies_path)
+
+        try:
+            # Запуск в отдельном потоке
+            proc = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(opts).extract_info(url_or_query, download=False))
+            return False
+        except Exception as e:
+            if "DRM protected" in str(e):
+                logger.warning(f"🛡️ [DRM Check] {url_or_query} is DRM protected.")
+                return True
+            return False
+
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
+        # Предварительная проверка на DRM
+        if await self._check_drm(url_or_query, source_name):
+            return DownloadResult(success=False, error_message="DRM protected")
+
         temp_path_str = str(target_path).replace(".mp3", f"_{source_name}_temp")
         temp_path = Path(temp_path_str)
         opts = {'format': 'bestaudio/best', 'outtmpl': temp_path_str, 'quiet': True, 'noprogress': True,
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                'force_ipv4': True, 'sleep_interval': 3, 'max_sleep_interval': 10, 'retries': 2}
+                'force_ipv4': True, 'sleep_interval': 3, 'max_sleep_interval': 10, 'retries': 0}
         
         # Выбор нужного файла кук
         if source_name == "SoundCloud":
@@ -314,6 +346,17 @@ class YouTubeDownloader:
         logger.error("All SoundCloud search attempts failed.")
         return DownloadResult(success=False)
 
+    async def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
+        # Сначала ищем в SQLite
+        track = await self._db.get_track(video_id)
+        if track: return track
+        
+        # Если нет, ищем в Redis кэше
+        cached_info = await self._cache.get(f"trackinfo:{video_id}")
+        if cached_info:
+            return TrackInfo(**cached_info)
+        return None
+
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
             loop = asyncio.get_running_loop()
@@ -324,14 +367,9 @@ class YouTubeDownloader:
                                   duration=int(details.get('lengthSeconds', 0)), url=f"https://music.youtube.com/watch?v={details['videoId']}",
                                   thumbnail_url=details['thumbnail']['thumbnails'][-1]['url'] if details.get('thumbnail') else None,
                                   source=Source.YTMUSIC)
-            await self._cache.set(f"trackinfo:{video_id}", dataclasses.asdict(track_info), ttl=3600 * 24 * 7)
+            # Сохраняем в SQLite
+            await self._db.save_track(track_info)
             return track_info
         except Exception as e:
             logger.error(f"Error reading from YTMusic details for {video_id}: {e}")
             return None
-
-    async def _get_track_info_from_cache(self, video_id: str) -> Optional[TrackInfo]:
-        cached_info = await self._cache.get(f"trackinfo:{video_id}")
-        if cached_info:
-            return TrackInfo(**cached_info)
-        return None

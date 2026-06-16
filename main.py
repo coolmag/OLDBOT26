@@ -23,6 +23,7 @@ from radio import RadioManager
 from chat_service import ChatManager
 from cache_service import CacheService
 from handlers import setup_handlers
+from event_bus import EventBus
 
 logger = logging.getLogger("main")
 
@@ -67,9 +68,16 @@ async def lifespan(app: FastAPI):
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
 
+    # Инициализация шины событий
+    event_bus = EventBus()
+
+    # Инициализация БД
+    db_service = DatabaseService(settings.DB_PATH)
+    await db_service.init_db()
+
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager, cache)
-    downloader = YouTubeDownloader(settings, cache)
+    downloader = YouTubeDownloader(settings, cache, db_service, event_bus)
 
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(120)
     tg_app = builder.build()
@@ -77,7 +85,7 @@ async def lifespan(app: FastAPI):
     quiz_manager = QuizManager(settings, downloader, chat_manager, cache)
     radio_manager = RadioManager(
         bot=tg_app.bot, settings=settings, downloader=downloader,
-        chat_manager=chat_manager, quiz_manager=quiz_manager
+        chat_manager=chat_manager, quiz_manager=quiz_manager, event_bus=event_bus
     )
 
     tg_app.bot_data['radio_manager'] = radio_manager

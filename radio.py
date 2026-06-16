@@ -20,6 +20,7 @@ from youtube import YouTubeDownloader
 from chat_service import ChatManager
 from cache_service import cache_service
 from ai_personas import PERSONAS
+from event_bus import EventBus
 
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
     MUSIC_CATALOG = json.load(f)
@@ -114,6 +115,7 @@ class RadioSession:
     chat_manager: ChatManager
     quiz_manager: QuizManager
     radio_manager: 'RadioManager'
+    event_bus: EventBus
     query: str
     display_name: str
     chat_type: Optional[str] = None
@@ -122,9 +124,10 @@ class RadioSession:
     is_running: bool = field(init=False, default=False)
     is_temporary_mode: bool = field(init=False, default=False)
     playlist: List[TrackInfo] = field(default_factory=list)
+    downloaded_queue: asyncio.Queue = field(init=False)
     played_ids: Set[str] = field(default_factory=set)
     current_task: Optional[asyncio.Task] = field(init=False, default=None)
-    next_track_task: Optional[asyncio.Task] = field(init=False, default=None)
+    prefetcher_task: Optional[asyncio.Task] = field(init=False, default=None)
     skip_event: asyncio.Event = field(default_factory=asyncio.Event)
     status_message: Optional[Message] = field(init=False, default=None)
     _is_searching: bool = field(init=False, default=False)
@@ -137,6 +140,10 @@ class RadioSession:
     quiz_title: str = field(init=False, default="")
     quiz_full: str = field(init=False, default="")
     last_quiz_time: float = field(init=False, default_factory=time.time)
+
+    def __post_init__(self):
+        self.downloaded_queue = asyncio.Queue(maxsize=3)
+
 
     async def _send_telegram_message_with_retry(self, func, *args, **kwargs):
         while True:
@@ -152,11 +159,13 @@ class RadioSession:
         if self.is_running: return
         self.is_running = True
         self.current_task = asyncio.create_task(self._radio_loop())
+        self.prefetcher_task = asyncio.create_task(self._prefetcher_loop())
         logger.info(f"[{self.chat_id}] 🚀 Эфир запущен: '{self.query}'")
 
     async def stop(self):
         self.is_running = False
         if self.current_task: self.current_task.cancel()
+        if self.prefetcher_task: self.prefetcher_task.cancel()
         self.quiz_active = False
         await self._delete_status()
         logger.info(f"[{self.chat_id}] 🛑 Эфир остановлен.")
@@ -195,7 +204,33 @@ class RadioSession:
             except: pass
             self.status_message = None
 
-    async def _fill_playlist(self, retry_query: str = None):
+    async def _prefetcher_loop(self):
+        """Фоновая задача для предварительной загрузки треков в очередь."""
+        while self.is_running:
+            try:
+                if self.downloaded_queue.full():
+                    await asyncio.sleep(5)
+                    continue
+
+                if len(self.playlist) < 3:
+                    await self._fill_playlist()
+                
+                if not self.playlist:
+                    await asyncio.sleep(5)
+                    continue
+
+                track = self.playlist.pop(0)
+                result = await self._download_track(track)
+
+                if result and result.success:
+                    await self.downloaded_queue.put((track, result))
+                else:
+                    self.failed_downloads_count += 1
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[{self.chat_id}] Prefetcher error: {e}", exc_info=True)
+                await asyncio.sleep(10)
         if self._is_searching or not self.is_running: return
         self._is_searching = True
 
@@ -333,17 +368,10 @@ class RadioSession:
                 logger.info(f"[{self.chat_id}] START DOWNLOAD: {track.title}")
                 download_start = time.time()
                 
-                if self.next_track_task:
-                    result = await self.next_track_task
-                    self.next_track_task = None
-                else:
-                    result = await self._download_track(track)
+                # Получаем готовый трек из очереди
+                track, result = await self.downloaded_queue.get()
                 
                 logger.info(f"[{self.chat_id}] END DOWNLOAD: {track.title}. Took: {time.time() - download_start:.2f}s")
-                
-                # Запускаем загрузку следующего трека заранее
-                if len(self.playlist) > 0:
-                    self.next_track_task = asyncio.create_task(self._download_track(self.playlist[0]))
                 
                 is_valid_file = False
                 if result and result.success:
@@ -479,8 +507,8 @@ class RadioSession:
             return False
 
 class RadioManager:
-    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager):
-        self._bot, self._settings, self._downloader, self._chat_manager, self._quiz_manager = bot, settings, downloader, chat_manager, quiz_manager
+    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager, event_bus: EventBus):
+        self._bot, self._settings, self._downloader, self._chat_manager, self._quiz_manager, self._event_bus = bot, settings, downloader, chat_manager, quiz_manager, event_bus
         self._sessions: Dict[int, RadioSession] = {}
         self._locks: Dict[int, asyncio.Lock] = {}
 
@@ -537,16 +565,17 @@ class RadioManager:
                     final_decade = random_decade
 
             session = RadioSession(
-                chat_id=chat_id, 
-                bot=self._bot, 
-                downloader=self._downloader, 
-                settings=self._settings, 
+                chat_id=chat_id,
+                bot=self._bot,
+                downloader=self._downloader,
+                settings=self._settings,
                 chat_manager=self._chat_manager,
                 quiz_manager=self._quiz_manager,
                 radio_manager=self,
-                query=final_query, 
+                event_bus=self._event_bus,
+                query=final_query,
                 display_name=final_display_name,
-                decade=final_decade, 
+                decade=final_decade,
                 chat_type=chat_type
             )
             self._sessions[chat_id] = session
