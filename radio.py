@@ -221,6 +221,7 @@ class RadioSession:
             logger.info(f"[{self.chat_id}] 🎶 Filling playlist from static list: {self.display_name}")
             sample_size = min(15, len(genre_node["tracks"]))
             track_names_to_search = random.sample(genre_node["tracks"], sample_size)
+            logger.info(f"[{self.chat_id}] Checking {len(track_names_to_search)} tracks from static list.")
             
             found_tracks = []
             for track_name in track_names_to_search:
@@ -230,9 +231,14 @@ class RadioSession:
                         track_info = search_results[0]
                         if track_info.identifier not in self.played_ids:
                             found_tracks.append(track_info)
+                        else:
+                            logger.info(f"[{self.chat_id}] Track {track_name} already played.")
+                    else:
+                        logger.info(f"[{self.chat_id}] No results for {track_name}")
                 except Exception as e:
                     logger.warning(f"Failed to search for static track '{track_name}': {e}")
             
+            logger.info(f"[{self.chat_id}] Found {len(found_tracks)} new tracks to add.")
             if found_tracks:
                 random.shuffle(found_tracks)
                 self.playlist.extend(found_tracks)
