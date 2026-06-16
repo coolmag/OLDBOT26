@@ -22,6 +22,7 @@ from quiz_service import QuizManager
 from radio import RadioManager
 from chat_service import ChatManager
 from cache_service import CacheService
+from db_service import DatabaseService
 from handlers import setup_handlers
 from event_bus import EventBus
 
