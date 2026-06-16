@@ -16,3 +16,4 @@ ffmpeg-python
 brotli
 pycryptodomex
 edge-tts
+redis

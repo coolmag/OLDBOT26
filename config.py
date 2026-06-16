@@ -51,7 +51,6 @@ class Settings(BaseSettings):
     DOWNLOADS_DIR: Path = WRITABLE_DIR / "downloads"
     TEMP_AUDIO_DIR: Path = WRITABLE_DIR / "temp_audio"
     CACHE_DB_PATH: Path = WRITABLE_DIR / "cache.db"
-    DB_PATH: Path = WRITABLE_DIR / "bot.db"
     COOKIES_FILE: Path = WRITABLE_DIR / "cookies.txt"
     YTDLP_COOKIES_FILE: Optional[Path] = None # Новое поле для cookies.txt yt-dlp
     PROXIES_FILE: Path = WRITABLE_DIR / "working_proxies.txt"
