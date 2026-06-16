@@ -3,6 +3,7 @@ import logging
 import random
 import subprocess
 import difflib
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -32,6 +33,9 @@ class YouTubeDownloader:
         self.semaphore = asyncio.Semaphore(1)
         self.ytmusic = YTMusic()
         self.http_client = httpx.AsyncClient(timeout=20.0)
+        
+        # Стоп-лист для треков, которые не качаются (защита от банов)
+        self.fail_cooldown = {}
 
         self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
         self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
@@ -79,6 +83,10 @@ class YouTubeDownloader:
         return results
 
     async def download(self, video_id: str, track_info: Optional[TrackInfo] = None) -> DownloadResult:
+        # Проверка стоп-листа (защита от банов)
+        if video_id in self.fail_cooldown and (time.time() - self.fail_cooldown[video_id] < 3600):
+            return DownloadResult(success=False, error_message="Cooldown: track failed recently")
+
         final_path = self._settings.DOWNLOADS_DIR / f"{video_id}.mp3"
         if final_path.exists():
             return DownloadResult(success=True, file_path=final_path, track_info=track_info)
@@ -88,12 +96,12 @@ class YouTubeDownloader:
             if not track_info: return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            # ПРИОРИТЕТ: SoundCloud -> Audius -> InternetArchive -> YouTube -> Jamendo
+            # Приоритет: YouTube -> SoundCloud -> Audius -> InternetArchive -> Jamendo
             methods = [
+                self._download_via_youtube,
                 self._download_via_soundcloud,
                 self._download_via_audius,
                 self._download_via_internet_archive,
-                self._download_via_youtube,
                 self._download_via_jamendo
             ]
             for method in methods:
@@ -105,7 +113,10 @@ class YouTubeDownloader:
                     return result
                 else:
                     await self._cache.record_failure(video_id)
-                    logger.warning(f"⚠️ {method.__name__} failed.")
+                    logger.warning(f"⚠️ {method.__name__} failed for {video_id}.")
+        
+        # Если все методы провалились, фиксируем трек в стоп-лист на час
+        self.fail_cooldown[video_id] = time.time()
         return DownloadResult(success=False, error_message="All download methods failed")
 
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
