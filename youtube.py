@@ -61,11 +61,9 @@ class YouTubeDownloader:
             video_id = item.get('videoId')
             if not video_id: continue
             
-            # Fuzzy Matching
             title = item.get('title', '')
             similarity = difflib.SequenceMatcher(None, query.lower(), title.lower()).ratio()
-            if similarity < 0.2:
-                continue
+            if similarity < 0.2: continue
 
             artists = ", ".join([a['name'] for a in item.get('artists', [])])
             duration_text = item.get('duration', '0:00')
@@ -90,7 +88,14 @@ class YouTubeDownloader:
             if not track_info: return DownloadResult(success=False, error_message=f"Could not get track info for {video_id}")
 
         async with self.semaphore:
-            methods = [self._download_via_soundcloud, self._download_via_audius, self._download_via_internet_archive, self._download_via_jamendo]
+            # ПРИОРИТЕТ: SoundCloud -> Audius -> InternetArchive -> YouTube -> Jamendo
+            methods = [
+                self._download_via_soundcloud,
+                self._download_via_audius,
+                self._download_via_internet_archive,
+                self._download_via_youtube,
+                self._download_via_jamendo
+            ]
             for method in methods:
                 if method.__name__ == "_download_via_jamendo" and not self._settings.JAMENDO_CLIENT_ID: continue
                 
@@ -115,9 +120,9 @@ class YouTubeDownloader:
         except Exception as e: return False, f"ffprobe failed: {e}"
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
-        # 1. Предиктивная проверка (метаданные)
         opts_sim = {'quiet': True, 'simulate': True, 'force_ipv4': True}
         if source_name == "SoundCloud": opts_sim['cookiefile'] = str(self.sc_cookies_path)
+        elif "YouTube" in source_name: opts_sim['cookiefile'] = str(self.yt_cookies_path)
 
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(opts_sim).extract_info(url_or_query, download=False))
@@ -128,12 +133,12 @@ class YouTubeDownloader:
         except Exception as e:
             return DownloadResult(success=False, error_message=str(e))
 
-        # 2. Скачивание
         temp_path_str = str(target_path).replace(".mp3", f"_{source_name}_temp")
         opts = {'format': 'bestaudio/best', 'outtmpl': temp_path_str, 'quiet': True, 'noprogress': True,
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
                 'force_ipv4': True}
         if source_name == "SoundCloud": opts['cookiefile'] = str(self.sc_cookies_path)
+        elif "YouTube" in source_name: opts['cookiefile'] = str(self.yt_cookies_path)
         
         try:
             await asyncio.to_thread(yt_dlp.YoutubeDL(opts).download, [url_or_query])
@@ -149,6 +154,10 @@ class YouTubeDownloader:
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
             return DownloadResult(success=False, error_message=str(e))
+
+    async def _download_via_youtube(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info(f"🚀 Trying direct YouTube download: {track_info.identifier}")
+        return await self._download_with_yt_dlp(f"https://www.youtube.com/watch?v={track_info.identifier}", target_path, "YouTubeDirect")
 
     async def _download_via_soundcloud(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         return await self._download_with_yt_dlp(f"scsearch1:{track_info.title}", target_path, "SoundCloud")
