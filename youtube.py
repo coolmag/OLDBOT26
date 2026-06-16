@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import subprocess
+import difflib
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -43,10 +44,6 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
-import difflib
-
-# ... (внутри класса YouTubeDownloader)
-
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if kwargs.get('decade'): query = f"{query} {kwargs['decade']}"
         if not query or not query.strip(): return []
@@ -64,11 +61,10 @@ import difflib
             video_id = item.get('videoId')
             if not video_id: continue
             
-            # Fuzzy Matching: отсеиваем результаты с низкой похожестью
+            # Fuzzy Matching
             title = item.get('title', '')
             similarity = difflib.SequenceMatcher(None, query.lower(), title.lower()).ratio()
-            if similarity < 0.2: # Порог похожести
-                logger.debug(f"⚠️ Skipping '{title}' (Similarity: {similarity:.2f})")
+            if similarity < 0.2:
                 continue
 
             artists = ", ".join([a['name'] for a in item.get('artists', [])])
@@ -97,10 +93,14 @@ import difflib
             methods = [self._download_via_soundcloud, self._download_via_audius, self._download_via_internet_archive, self._download_via_jamendo]
             for method in methods:
                 if method.__name__ == "_download_via_jamendo" and not self._settings.JAMENDO_CLIENT_ID: continue
+                
                 result = await method(track_info, final_path)
                 if result.success:
                     result.track_info = track_info
                     return result
+                else:
+                    await self._cache.record_failure(video_id)
+                    logger.warning(f"⚠️ {method.__name__} failed.")
         return DownloadResult(success=False, error_message="All download methods failed")
 
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
@@ -154,7 +154,7 @@ import difflib
         return await self._download_with_yt_dlp(f"scsearch1:{track_info.title}", target_path, "SoundCloud")
 
     async def _download_via_audius(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
-        return DownloadResult(success=False) # Реализуй если нужно
+        return DownloadResult(success=False)
 
     async def _download_via_internet_archive(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         return DownloadResult(success=False)
