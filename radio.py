@@ -301,17 +301,17 @@ class RadioSession:
                 await asyncio.sleep(10)
 
     async def _download_track(self, track: TrackInfo) -> Optional[DownloadResult]:
-        try:
-            return await asyncio.wait_for(
-                self.downloader.download(track.identifier, track_info=track),
-                timeout=120.0
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"[{self.chat_id}] TIMEOUT: Download for {track.title} took too long.")
+        track.fail_count = getattr(track, 'fail_count', 0)
+        if track.fail_count >= 2:
+            logger.warning(f"❌ Трек {track.title} провален дважды, пропускаем.")
+            return None 
+
+        result = await self.downloader.download(track.identifier, track_info=track)
+        
+        if not result.success:
+            track.fail_count += 1
             return None
-        except Exception as e:
-            logger.error(f"[{self.chat_id}] UNCAUGHT exception during download call: {e}", exc_info=True)
-            return None
+        return result
 
     async def _radio_loop(self):
         while self.is_running:
