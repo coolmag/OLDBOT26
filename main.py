@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
 
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager, cache)
-    downloader = YouTubeDownloader(settings, cache, db_service, event_bus)
+    downloader = YouTubeDownloader(settings, cache)
 
     builder = Application.builder().token(settings.BOT_TOKEN).read_timeout(30).write_timeout(120)
     tg_app = builder.build()
