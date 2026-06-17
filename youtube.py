@@ -44,13 +44,19 @@ class YouTubeDownloader:
         self.ytmusic = YTMusic()
         self.http_client = httpx.AsyncClient(timeout=30.0)
 
-        # Manually parse instances from comma-separated strings
-        piped_str = getattr(settings, 'PIPED_INSTANCES', "")
-        self.piped_instances = [item.strip() for item in piped_str.split(',') if item.strip()]
+        # Piped instances (API endpoints, NOT websites)
+        self.piped_instances = getattr(settings, 'PIPED_INSTANCES', [
+            "https://pipedapi.adminforge.de",
+            "https://pipedapi.kavin.rocks",
+            "https://api-piped.mha.fi",
+            "https://pipedapi.drgns.space",
+            "https://pipedapi.leptons.xyz"
+        ])
         
-        cobalt_str = getattr(settings, 'COBALT_INSTANCES', "")
-        self.cobalt_instances = [item.strip() for item in cobalt_str.split(',') if item.strip()]
+        # Cobalt instances
+        self.cobalt_instances = getattr(settings, 'COBALT_INSTANCES', ["https://api.cobalt.tools"])
         
+        # Invidious instances
         invidious_str = getattr(settings, 'INVIDIOUS_INSTANCES', "")
         self.invidious_instances = [item.strip() for item in invidious_str.split(',') if item.strip()]
 
@@ -278,31 +284,25 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="All Piped instances failed")
 
     async def _download_via_cobalt(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
-        """Скачивание через Cobalt API"""
         logger.info("Attempting Cobalt...")
         video_url = f"https://www.youtube.com/watch?v={track_info.identifier}"
-        
+     
+        # Cobalt v10 требует специфичные заголовки
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+     
         for instance in self.cobalt_instances:
             try:
-                payload = {
-                    "url": video_url,
-                    "isAudioOnly": True,
-                    "aFormat": "mp3"
-                }
-                resp = await self.http_client.post(f"{instance}/api/json", json=payload, timeout=20.0)
-                
+                payload = {"url": video_url, "downloadMode": "audio", "audioFormat": "mp3"}
+                resp = await self.http_client.post(f"{instance}/", json=payload, headers=headers, timeout=20.0)
+             
                 if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("status") == "stream" or data.get("status") == "redirect":
+                    if data.get("status") in ["stream", "redirect", "tunnel"]:
                         audio_url = data.get("url")
                         if audio_url:
-                            result = await self._download_direct_http(audio_url, target_path, f"Cobalt({instance})")
-                            if result.success:
-                                return result
+                            return await self._download_direct_http(audio_url, target_path, f"Cobalt({instance})")
             except Exception as e:
                 logger.warning(f"⚠️ Cobalt instance {instance} failed: {e}")
-                continue
-        
         return DownloadResult(success=False, error_message="All Cobalt instances failed")
 
     async def _download_via_invidious(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
@@ -341,28 +341,24 @@ class YouTubeDownloader:
         logger.info("Attempting Internet Archive...")
         query = f"{track_info.uploader} {track_info.title}"
         try:
-            # 🔥 ВАЖНО: Ищем ТОЛЬКО mp3, чтобы не качать огромные FLAC файлы
-            params = {
-                "q": f"{query} AND mediatype:(audio) AND format:(mp3)",
-                "fl[]": ["identifier", "title"],
-                "output": "json",
-                "rows": "1"
-            }
+            params = {"q": f"{query} AND mediatype:(audio) AND format:(mp3)", "fl[]": ["identifier", "title"], "output": "json", "rows": "1"}
             resp = await self.http_client.get("https://archive.org/advancedsearch.php", params=params)
             resp.raise_for_status()
             data = resp.json().get("response", {}).get("docs", [])
             if not data: return DownloadResult(success=False, error_message="Not found on IA")
-            
+         
             identifier = data[0]['identifier']
             files_resp = await self.http_client.get(f"https://archive.org/metadata/{identifier}/files")
             files_resp.raise_for_status()
             files = files_resp.json().get("result", [])
-            
-            # Ищем именно mp3 файл
-            mp3_file = next((f for f in files if f['name'].endswith('.mp3')), None)
-            if not mp3_file: return DownloadResult(success=False, error_message="No MP3 on IA")
-            
-            audio_url = f"https://archive.org/download/{identifier}/{mp3_file['name']}"
+         
+            import urllib.parse
+            # Фильтруем спам: имя файла должно заканчиваться на .mp3 и быть адекватной длины
+            mp3_file = next((f for f in files if f['name'].endswith('.mp3') and len(f['name']) < 100), None)
+            if not mp3_file: return DownloadResult(success=False, error_message="No valid MP3 on IA")
+         
+            safe_name = urllib.parse.quote(mp3_file['name'])
+            audio_url = f"https://archive.org/download/{identifier}/{safe_name}"
             return await self._download_direct_http(audio_url, target_path, "InternetArchive")
         except Exception as e:
             logger.error(f"Internet Archive failed: {e}")
