@@ -83,29 +83,38 @@ class AIManager:
         return "google/gemini-2.0-flash-lite-preview-02-05:free"
 
     async def analyze_message(self, text: str) -> dict:
-        prompt = f"""Analyze this user message for a Telegram music bot.
-        Message: "{text}"
-        
-        You MUST classify the intent strictly based on these rules:
-        
-        1. intent: "radio"
-        - The user wants a CONTINUOUS STREAM of music.
-        - Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
-        - Example 1: "послушаем линкин парк" -> intent: "radio", query: "linkin park"
-        - Example 2: "врубай советский грув" -> intent: "radio", query: "советский грув"
+        prompt = (
+            f"Analyze this user message for a Telegram music bot.
+"
+            f"Message: "{text}"
 
-        2. intent: "search"
-        - The user wants ONE SPECIFIC SONG.
-        - Keywords: "найди", "включи песню", "скачай".
-        - Example: "Сектор газа лирика | для Сани" -> intent: "search", query: "Сектор газа лирика | для Сани"
+"
+            f"You MUST classify the intent strictly based on these rules:
 
-        3. intent: "chat"
-        - The user is talking, asking questions, greeting.
-        - Example: "как дела?".
+"
+            f"1. intent: "radio"
+"
+            f"- The user wants a CONTINUOUS STREAM of music.
+"
+            f"- Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
 
-        Return ONLY a valid JSON object:
-        {{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
-        """
+"
+            f"2. intent: "search"
+"
+            f"- The user wants ONE SPECIFIC SONG.
+"
+            f"- Keywords: "найди", "включи песню", "скачай".
+
+"
+            f"3. intent: "chat"
+"
+            f"- The user is talking, asking questions, greeting.
+
+"
+            f"Return ONLY a valid JSON object:
+"
+            f"{{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}"
+        )
 
         # --- Level 1: OpenRouter (Primary for JSON) ---
         if "OpenRouter" in self.providers:
@@ -178,8 +187,9 @@ class AIManager:
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        full_prompt = f"""{system_prompt}
-User: {prompt}"""
+        full_prompt = f"{system_prompt}
+User: {prompt}"
+        
         # --- Level 1: OpenRouter (Primary) ---
         if "OpenRouter" in self.providers and not self._is_blocked("OpenRouter"):
             try:
@@ -254,8 +264,8 @@ User: {prompt}"""
                     raise Exception("Empty response received")
             except Exception as e:
                 error_summary = str(e).splitlines()[0]
-                report.append(f"""❌ `Google AI`: FAILED
-                `Reason`: {error_summary}""")
+                report.append(f"❌ `Google AI`: FAILED
+`Reason`: {error_summary}")
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
         else:
             report.append("⚠️ `Google AI`: SKIPPED (no key)")
@@ -271,8 +281,8 @@ User: {prompt}"""
                     raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
             except Exception as e:
                 error_summary = str(e).splitlines()[0]
-                report.append(f"""❌ `OpenRouter`: FAILED
-                `Reason`: {error_summary}""")
+                report.append(f"❌ `OpenRouter`: FAILED
+`Reason`: {error_summary}")
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
         else:
             report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
