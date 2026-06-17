@@ -10,9 +10,12 @@ from config import Settings
 
 logger = logging.getLogger("ai_manager")
 
+# Bulletproof newline character to avoid copy-paste syntax errors
+NL = chr(10)
+
 class AIManager:
     """
-    🧠 AI Manager (OpenRouter First, Google AI Fallback) with Circuit Breaker.
+    AI Manager (OpenRouter First, Google AI Fallback) with Circuit Breaker.
     """
 
     def __init__(self, settings: Settings):
@@ -23,27 +26,25 @@ class AIManager:
             "GoogleAI": {"count": 0, "blocked_until": 0}
         }
 
-        # Setup Google AI
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
         if gemini_key:
             try:
                 genai.configure(api_key=gemini_key)
-                genai.GenerativeModel('gemini-pro')  # Test call
+                genai.GenerativeModel('gemini-pro')
                 self.providers.append("GoogleAI")
-                logger.info("✅ Google AI provider configured (as fallback).")
+                logger.info("Google AI provider configured (as fallback).")
             except Exception as e:
-                logger.error(f"❌ Google AI connection error: {e}")
+                logger.error(f"Google AI connection error: {e}")
 
-        # Setup OpenRouter
         if self.settings.OPENROUTER_API_KEY:
             self.openrouter_client = httpx.AsyncClient()
             self.providers.append("OpenRouter")
-            logger.info("✅ OpenRouter provider configured (as primary).")
+            logger.info("OpenRouter provider configured (as primary).")
 
         if self.providers:
-            logger.info(f"✅ ИИ успешно подключен (Основной мозг и логика: OpenRouter, Резерв: Google AI)")
+            logger.info("AI successfully connected (Primary: OpenRouter, Fallback: Google AI)")
         else:
-            logger.error("❌ ВСЕ КЛЮЧИ НЕ НАЙДЕНЫ! Бот работает в режиме без ИИ.")
+            logger.error("ALL KEYS NOT FOUND! Bot running without AI.")
 
     def _is_blocked(self, provider: str) -> bool:
         tracker = self.failure_tracker.get(provider)
@@ -56,7 +57,7 @@ class AIManager:
         if tracker:
             tracker["count"] += 1
             if tracker["count"] >= 3:
-                logger.warning(f"🚫 Blocking provider {provider} for 5 minutes due to multiple failures.")
+                logger.warning(f"Blocking provider {provider} for 5 minutes.")
                 tracker["blocked_until"] = time.time() + 300
                 tracker["count"] = 0
 
@@ -68,51 +69,35 @@ class AIManager:
 
     async def _get_best_free_model(self) -> str:
         try:
-            logger.info("📡 Fetching latest free models from OpenRouter...")
+            logger.info("Fetching latest free models from OpenRouter...")
             response = await self.openrouter_client.get("https://openrouter.ai/api/v1/models", timeout=10)
             data = response.json()
-            # Фильтруем модели с нулевой ценой за prompt
-            free_models = [m['id'] for m in data['data'] if m['pricing']['prompt'] == '0']
+            free_models = [m['id'] for m in data['data'] if m.get('pricing', {}).get('prompt') == '0']
             if free_models:
-                logger.info(f"✅ Found free model: {free_models[0]}")
+                logger.info(f"Found free model: {free_models[0]}")
                 return free_models[0]
         except Exception as e:
-            logger.error(f"❌ Failed to fetch free models: {e}")
-        
-        # Резервный вариант, если список получить не удалось
-        return "google/gemini-2.0-flash-lite-preview-02-05:free"
+            logger.error(f"Failed to fetch free models: {e}")
+        return "google/gemma-3-4b-it:free"
 
     async def analyze_message(self, text: str) -> dict:
-        prompt = f"""Analyze this user message for a Telegram music bot.
-Message: "{text}"
+        prompt = (
+            "Analyze this user message for a Telegram music bot. "
+            "Message: "" + text + "". "
+            "You MUST classify the intent strictly based on these rules: "
+            "1. intent: "radio" - The user wants a CONTINUOUS STREAM of music. "
+            "Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай". "
+            "2. intent: "search" - The user wants ONE SPECIFIC SONG. "
+            "Keywords: "найди", "включи песню", "скачай". "
+            "3. intent: "chat" - The user is talking, asking questions, greeting. "
+            "Return ONLY a valid JSON object: "
+            "{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}"
+        )
 
-You MUST classify the intent strictly based on these rules:
-
-1. intent: "radio"
-- The user wants a CONTINUOUS STREAM of music.
-- Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
-- Example 1: "послушаем линкин парк" -> intent: "radio", query: "linkin park"
-- Example 2: "врубай советский грув" -> intent: "radio", query: "советский грув"
-
-2. intent: "search"
-- The user wants ONE SPECIFIC SONG.
-- Keywords: "найди", "включи песню", "скачай".
-- Example: "Сектор газа лирика | для Сани" -> intent: "search", query: "Сектор газа лирика | для Сани"
-
-3. intent: "chat"
-- The user is talking, asking questions, greeting.
-- Example: "как дела?".
-
-Return ONLY a valid JSON object:
-{{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
-"""
-
-        # --- Level 1: OpenRouter (Primary for JSON) ---
         if "OpenRouter" in self.providers:
             res = await self._call_openrouter_for_json(prompt)
             if res: return res
 
-        # --- Level 2: Google AI (Fallback for JSON) ---
         if "GoogleAI" in self.providers:
             res = await self._call_flash_for_json(prompt)
             if res: return res
@@ -122,7 +107,7 @@ Return ONLY a valid JSON object:
     async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
         if self._is_blocked("GoogleAI"): return None
         try:
-            logger.warning("🔄 Falling back to Flash for JSON analysis")
+            logger.warning("Falling back to Flash for JSON analysis")
             model = genai.GenerativeModel("gemini-1.5-flash-latest")
             response = await model.generate_content_async(
                 prompt,
@@ -131,14 +116,14 @@ Return ONLY a valid JSON object:
             self._clear_failure("GoogleAI")
             return self._parse_json(response.text)
         except Exception as e:
-            logger.error(f"❌ Flash API error (JSON): {e}")
+            logger.error(f"Flash API error (JSON): {e}")
             self._record_failure("GoogleAI")
             return None
 
     async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
         if not self.settings.OPENROUTER_API_KEY: return None
         model = await self._get_best_free_model()
-        logger.info(f"🔄 Trying OpenRouter for JSON analysis using {model}...")
+        logger.info(f"Trying OpenRouter for JSON analysis using {model}...")
         try:
             response = await self.openrouter_client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -158,11 +143,11 @@ Return ONLY a valid JSON object:
             data = response.json()
             return self._parse_json(data["choices"][0]["message"]["content"])
         except Exception as e:
-            logger.error(f"❌ OpenRouter JSON analysis failed: {e}")
+            logger.error(f"OpenRouter JSON analysis failed: {e}")
         return None
 
     def _regex_fallback(self, text: str) -> dict:
-        logger.warning("⚠️ AI analysis failed. Using Regex Fallback.")
+        logger.warning("AI analysis failed. Using Regex Fallback.")
         text_lower = text.lower()
         
         chat_keywords = ['привет', 'как дела', 'что делаешь', 'аврора', 'бот', 'кто ты', 'на связи']
@@ -172,42 +157,40 @@ Return ONLY a valid JSON object:
         radio_keywords = ['радио', 'волна', 'микс', 'плейлист', 'врубай', 'давай', 'послушаем', 'включи']
         if any(k in text_lower for k in radio_keywords):
             query = text
-            for k in radio_keywords: query = query.lower().replace(k, '')
+            for k in radio_keywords: 
+                query = query.lower().replace(k, '')
             return {"intent": "radio", "query": query.strip() or "top hits"}
             
         return {"intent": "search", "query": text}
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
-        full_prompt = f"{system_prompt}
-User: {prompt}"
+        full_prompt = system_prompt + NL + "User: " + prompt
         
-        # --- Level 1: OpenRouter (Primary) ---
         if "OpenRouter" in self.providers and not self._is_blocked("OpenRouter"):
             try:
-                logger.info("🔄 Trying OpenRouter for Chat...")
+                logger.info("Trying OpenRouter for Chat...")
                 response = await self._call_openrouter(full_prompt)
                 if response:
                     return response
             except Exception as e:
-                logger.error(f"❌ OpenRouter (Primary) failed: {e}")
+                logger.error(f"OpenRouter (Primary) failed: {e}")
 
-        # --- Level 2: Google AI (Flash Fallback) ---
         if "GoogleAI" in self.providers and not self._is_blocked("GoogleAI"):
             try:
-                logger.warning("🔄 Falling back to Flash for Chat")
+                logger.warning("Falling back to Flash for Chat")
                 model = genai.GenerativeModel("gemini-1.5-flash-latest")
                 response = await model.generate_content_async(
                     full_prompt,
                     generation_config=types.GenerationConfig(temperature=0.9)
                 )
                 self._clear_failure("GoogleAI")
-                logger.info("💬 Flash (Chat) responded.")
+                logger.info("Flash (Chat) responded.")
                 return response.text
             except Exception as e:
-                logger.error(f"❌ Flash fallback failed: {e}")
+                logger.error(f"Flash fallback failed: {e}")
                 self._record_failure("GoogleAI")
 
-        return "Извини, мои нейромодули обесточены. Проверь API-ключ! 🔌"
+        return "Извини, мои нейромодули обесточены. Проверь API-ключ!"
 
     async def _call_openrouter(self, full_prompt: str) -> Optional[str]:
         if not self.settings.OPENROUTER_API_KEY or self._is_blocked("OpenRouter"): return None
@@ -221,7 +204,7 @@ User: {prompt}"
                     "X-Title": "Aurora AI DJ"
                 },
                 json={
-                    "model": "deepseek/deepseek-v4-flash",
+                    "model": "deepseek/deepseek-v3-base:free",
                     "messages": [
                         {"role": "user", "content": full_prompt}
                     ]
@@ -230,7 +213,7 @@ User: {prompt}"
             )
             response.raise_for_status()
             data = response.json()
-            logger.info("💬 OpenRouter (DeepSeek V4 Flash) responded.")
+            logger.info("OpenRouter responded.")
             self._clear_failure("OpenRouter")
             return data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
@@ -242,44 +225,39 @@ User: {prompt}"
         return None
 
     async def test_providers(self) -> str:
-        report = ["🤖 **AI Providers Status Check:**"]
+        report = ["**AI Providers Status Check:**"]
 
-        # --- Test Google AI ---
         if "GoogleAI" in self.providers:
             try:
                 model = genai.GenerativeModel("gemini-1.5-flash-latest")
                 response = await model.generate_content_async("test", generation_config=types.GenerationConfig(temperature=0.1))
                 if response.text:
-                    report.append("✅ `Google AI`: OK")
+                    report.append("Google AI: OK")
                 else:
                     raise Exception("Empty response received")
             except Exception as e:
                 error_summary = str(e).splitlines()[0]
-                report.append(f"❌ `Google AI`: FAILED
-`Reason`: {error_summary}")
+                report.append("Google AI: FAILED. Reason: " + error_summary)
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
         else:
-            report.append("⚠️ `Google AI`: SKIPPED (no key)")
+            report.append("Google AI: SKIPPED (no key)")
 
-        # --- Test OpenRouter ---
         if "OpenRouter" in self.providers:
             try:
                 test_prompt = "Hello"
                 or_response = await self._call_openrouter(test_prompt)
                 if or_response:
-                    report.append("✅ `OpenRouter`: OK")
+                    report.append("OpenRouter: OK")
                 else:
-                    raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
+                    raise Exception("Empty response.")
             except Exception as e:
                 error_summary = str(e).splitlines()[0]
-                report.append(f"❌ `OpenRouter`: FAILED
-`Reason`: {error_summary}")
+                report.append("OpenRouter: FAILED. Reason: " + error_summary)
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
         else:
-            report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
+            report.append("OpenRouter: SKIPPED (no key)")
 
-        return "
-".join(report)
+        return NL.join(report)
 
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
@@ -290,12 +268,12 @@ User: {prompt}"
             response = await model.generate_content_async(
                 [
                     types.Part.from_bytes(data=bytes(voice_bytes), mime_type='audio/ogg'),
-                    "Транскрибируй это голосовое сообщение в текст. Выведи ТОЛЬКО текст, без кавычек."
+                    "Transcribe this voice message to text. Output ONLY the text."
                 ]
             )
             return response.text.strip()
         except Exception as e:
-            logger.error(f"❌ Voice processing failed: {e}")
+            logger.error(f"Voice processing failed: {e}")
             return None
 
     def _parse_json(self, text: str) -> Optional[dict]:
