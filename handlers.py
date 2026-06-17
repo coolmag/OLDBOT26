@@ -402,7 +402,22 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("toprock", toprock_command))
     app.add_handler(CommandHandler("test_ai", test_ai_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("stats_failed", stats_failed_command))
     app.add_handler(CommandHandler("disk", disk_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))
+
+async def stats_failed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает статистику неудачных попыток скачивания."""
+    stats = await cache_service.get_failure_stats()
+    if not stats:
+        await update.message.reply_text("✅ Статистика провалов пуста.")
+        return
+    
+    text = "📉 *Топ-10 провалов при скачивании:*\n\n"
+    sorted_stats = sorted(stats.items(), key=lambda x: int(x[1]), reverse=True)[:10]
+    for track_id, count in sorted_stats:
+        text += f"- `{track_id}`: {count} раз\n"
+    
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)

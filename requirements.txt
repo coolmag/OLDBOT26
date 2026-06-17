@@ -16,4 +16,4 @@ ffmpeg-python
 brotli
 pycryptodomex
 edge-tts
-redis
+bgutil-ytdlp-pot-provider @ https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/main.tar.gz

@@ -40,7 +40,6 @@ class CacheService:
 
     def _add_to_memory_cache(self, key: str, value: Any):
         if len(self._in_memory_cache) >= self._max_cache_size:
-            # Удаляем самый старый элемент (первый ключ в словаре в Python 3.7+)
             oldest_key = next(iter(self._in_memory_cache))
             self._in_memory_cache.pop(oldest_key)
         self._in_memory_cache[key] = value
@@ -70,14 +69,15 @@ class CacheService:
                 await self.redis_client.hincrby(name, key, amount)
             except Exception as e:
                 logger.error(f"Redis hincr error: {e}")
-                # Fallback
-                val = self._in_memory_cache.get(name, {}).get(key, 0)
-                if name not in self._in_memory_cache: self._in_memory_cache[name] = {}
-                self._in_memory_cache[name][key] = val + amount
+                self._fallback_hincr(name, key, amount)
         else:
-            val = self._in_memory_cache.get(name, {}).get(key, 0)
-            if name not in self._in_memory_cache: self._in_memory_cache[name] = {}
-            self._in_memory_cache[name][key] = val + amount
+            self._fallback_hincr(name, key, amount)
+
+    def _fallback_hincr(self, name: str, key: str, amount: int):
+        if name not in self._in_memory_cache: self._in_memory_cache[name] = {}
+        if not isinstance(self._in_memory_cache[name], dict): self._in_memory_cache[name] = {}
+        val = self._in_memory_cache[name].get(key, 0)
+        self._in_memory_cache[name][key] = val + amount
 
     async def hgetall(self, name: str) -> dict:
         if self.redis_client:
@@ -88,6 +88,13 @@ class CacheService:
                 return self._in_memory_cache.get(name, {})
         else:
             return self._in_memory_cache.get(name, {})
+
+    # НОВЫЕ МЕТОДЫ ДЛЯ АНАЛИТИКИ
+    async def record_failure(self, track_id: str):
+        await self.hincr("fail_stats", track_id, 1)
+
+    async def get_failure_stats(self) -> dict:
+        return await self.hgetall("fail_stats")
 
 # Глобальный экземпляр для использования в других модулях
 cache_service = CacheService()

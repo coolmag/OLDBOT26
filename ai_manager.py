@@ -120,11 +120,11 @@ class AIManager:
     async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
         if self._is_blocked("GoogleAI"): return None
         try:
-            logger.warning("🔄 Falling back to Gemini Flash for JSON analysis")
+            logger.warning("🔄 Falling back to Gemma 4 for Chat")
             response = self.gemini_client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+                model="gemma-4-e2b",
+                contents=full_prompt,
+                config=types.GenerateContentConfig(temperature=0.9)
             )
             self._clear_failure("GoogleAI")
             return self._parse_json(response.text)
@@ -209,10 +209,10 @@ User: {prompt}"""
                     
             # --- Level 3: Google AI (Flash Fallback) ---
             try:
-                logger.warning("🔄 Falling back to Gemini Flash for Chat")
+                logger.warning("🔄 Falling back to Gemma 4 for Chat")
                 response = self.gemini_client.models.generate_content(
-                    model="gemini-2.5-flash", 
-                    contents=full_prompt, 
+                    model="gemma-4-e2b",
+                    contents=full_prompt,
                     config=types.GenerateContentConfig(temperature=0.9)
                 )
                 self._clear_failure("GoogleAI")
