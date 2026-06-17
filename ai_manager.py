@@ -81,18 +81,25 @@ class AIManager:
         return "google/gemma-3-4b-it:free"
 
     async def analyze_message(self, text: str) -> dict:
-        prompt = (
-            "Analyze this user message for a Telegram music bot. "
-            "Message: "" + text + "". "
-            "You MUST classify the intent strictly based on these rules: "
-            "1. intent: "radio" - The user wants a CONTINUOUS STREAM of music. "
-            "Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай". "
-            "2. intent: "search" - The user wants ONE SPECIFIC SONG. "
-            "Keywords: "найди", "включи песню", "скачай". "
-            "3. intent: "chat" - The user is talking, asking questions, greeting. "
-            "Return ONLY a valid JSON object: "
-            "{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}"
-        )
+        prompt = f"""Analyze this user message for a Telegram music bot.
+Message: "{text}"
+
+You MUST classify the intent strictly based on these rules:
+
+1. intent: "radio"
+- The user wants a CONTINUOUS STREAM of music.
+- Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
+
+2. intent: "search"
+- The user wants ONE SPECIFIC SONG.
+- Keywords: "найди", "включи песню", "скачай".
+
+3. intent: "chat"
+- The user is talking, asking questions, greeting.
+
+Return ONLY a valid JSON object:
+{{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
+"""
 
         if "OpenRouter" in self.providers:
             res = await self._call_openrouter_for_json(prompt)
