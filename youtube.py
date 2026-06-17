@@ -341,8 +341,9 @@ class YouTubeDownloader:
         logger.info("Attempting Internet Archive...")
         query = f"{track_info.uploader} {track_info.title}"
         try:
+            # 🔥 ВАЖНО: Ищем ТОЛЬКО mp3, чтобы не качать огромные FLAC файлы
             params = {
-                "q": query,
+                "q": f"{query} AND mediatype:(audio) AND format:(mp3)",
                 "fl[]": ["identifier", "title"],
                 "output": "json",
                 "rows": "1"
@@ -357,6 +358,7 @@ class YouTubeDownloader:
             files_resp.raise_for_status()
             files = files_resp.json().get("result", [])
             
+            # Ищем именно mp3 файл
             mp3_file = next((f for f in files if f['name'].endswith('.mp3')), None)
             if not mp3_file: return DownloadResult(success=False, error_message="No MP3 on IA")
             
