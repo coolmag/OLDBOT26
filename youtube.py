@@ -44,23 +44,15 @@ class YouTubeDownloader:
         self.ytmusic = YTMusic()
         self.http_client = httpx.AsyncClient(timeout=30.0)
 
-        # Piped instances (YouTube proxy)
-        self.piped_instances = getattr(settings, 'PIPED_INSTANCES', [
-            "https://pipedapi.tokhmi.xyz",
-            "https://pipedapi.smnz.de",
-            "https://pipedapi.lunar.icu"
-        ])
+        # Manually parse instances from comma-separated strings
+        piped_str = getattr(settings, 'PIPED_INSTANCES', "")
+        self.piped_instances = [item.strip() for item in piped_str.split(',') if item.strip()]
         
-        # Cobalt instances
-        self.cobalt_instances = getattr(settings, 'COBALT_INSTANCES', [
-            "https://api.cobalt.tools"
-        ])
+        cobalt_str = getattr(settings, 'COBALT_INSTANCES', "")
+        self.cobalt_instances = [item.strip() for item in cobalt_str.split(',') if item.strip()]
         
-        # Invidious instances
-        self.invidious_instances = getattr(settings, 'INVIDIOUS_INSTANCES', [
-            "https://invidious.snopyta.org",
-            "https://vid.puffyan.us"
-        ])
+        invidious_str = getattr(settings, 'INVIDIOUS_INSTANCES', "")
+        self.invidious_instances = [item.strip() for item in invidious_str.split(',') if item.strip()]
 
         # PO Token для обхода BotGuard
         self.po_token = getattr(settings, 'PO_TOKEN', None)

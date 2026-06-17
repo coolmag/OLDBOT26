@@ -34,16 +34,9 @@ class Settings(BaseSettings):
     JAMENDO_CLIENT_ID: str = ""
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)
     
-    COBALT_INSTANCES: List[str] = ["https://api.cobalt.tools"]
-    PIPED_INSTANCES: List[str] = [
-        "https://pipedapi.tokhmi.xyz",
-        "https://pipedapi.smnz.de",
-        "https://pipedapi.lunar.icu"
-    ]
-    INVIDIOUS_INSTANCES: List[str] = [
-        "https://invidious.snopyta.org",
-        "https://vid.puffyan.us"
-    ]
+    COBALT_INSTANCES: str = "https://api.cobalt.tools"
+    PIPED_INSTANCES: str = "https://pipedapi.tokhmi.xyz,https://pipedapi.smnz.de,https://pipedapi.lunar.icu"
+    INVIDIOUS_INSTANCES: str = "https://invidious.snopyta.org,https://vid.puffyan.us"
 
     GOOGLE_API_KEY: str = ""
     VK_LOGIN: Optional[str] = None
@@ -70,16 +63,6 @@ class Settings(BaseSettings):
     TRACK_MAX_DURATION_S: int = 900
     TRACK_MIN_DURATION_S: int = 60
     ENABLE_AI_DJ_INTRO: bool = False # Включает/выключает генерацию голосовой подводки от AI DJ перед треком
-
-    @field_validator("COBALT_INSTANCES", "PIPED_INSTANCES", "INVIDIOUS_INSTANCES", mode="before")
-    @classmethod
-    def _parse_instances(cls, v: Any) -> List[str]:
-        if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
-        if isinstance(v, list):
-            return v
-        return []
-
 
 
     @field_validator("YTDLP_COOKIES_FILE", mode="before")
