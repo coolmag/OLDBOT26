@@ -83,38 +83,29 @@ class AIManager:
         return "google/gemini-2.0-flash-lite-preview-02-05:free"
 
     async def analyze_message(self, text: str) -> dict:
-        prompt = (
-            f"Analyze this user message for a Telegram music bot.
-"
-            f"Message: "{text}"
+        prompt = f"""Analyze this user message for a Telegram music bot.
+Message: "{text}"
 
-"
-            f"You MUST classify the intent strictly based on these rules:
+You MUST classify the intent strictly based on these rules:
 
-"
-            f"1. intent: "radio"
-"
-            f"- The user wants a CONTINUOUS STREAM of music.
-"
-            f"- Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
+1. intent: "radio"
+- The user wants a CONTINUOUS STREAM of music.
+- Keywords: "послушаем", "врубай", "радио", "волна", "микс", "плейлист", "настроение", "вайб", "поставь что-нибудь", "давай".
+- Example 1: "послушаем линкин парк" -> intent: "radio", query: "linkin park"
+- Example 2: "врубай советский грув" -> intent: "radio", query: "советский грув"
 
-"
-            f"2. intent: "search"
-"
-            f"- The user wants ONE SPECIFIC SONG.
-"
-            f"- Keywords: "найди", "включи песню", "скачай".
+2. intent: "search"
+- The user wants ONE SPECIFIC SONG.
+- Keywords: "найди", "включи песню", "скачай".
+- Example: "Сектор газа лирика | для Сани" -> intent: "search", query: "Сектор газа лирика | для Сани"
 
-"
-            f"3. intent: "chat"
-"
-            f"- The user is talking, asking questions, greeting.
+3. intent: "chat"
+- The user is talking, asking questions, greeting.
+- Example: "как дела?".
 
-"
-            f"Return ONLY a valid JSON object:
-"
-            f"{{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}"
-        )
+Return ONLY a valid JSON object:
+{{"intent": "radio"|"search"|"chat", "query": "extracted search term or null"}}
+"""
 
         # --- Level 1: OpenRouter (Primary for JSON) ---
         if "OpenRouter" in self.providers:
