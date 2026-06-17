@@ -14,6 +14,7 @@ class AIManager:
     """
     🧠 AI Manager (OpenRouter First, Google AI Fallback) with Circuit Breaker.
     """
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.providers = []
@@ -21,13 +22,13 @@ class AIManager:
             "OpenRouter": {"count": 0, "blocked_until": 0},
             "GoogleAI": {"count": 0, "blocked_until": 0}
         }
-        
+
         # Setup Google AI
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
         if gemini_key:
             try:
                 genai.configure(api_key=gemini_key)
-                genai.GenerativeModel('gemini-pro') # Test call
+                genai.GenerativeModel('gemini-pro')  # Test call
                 self.providers.append("GoogleAI")
                 logger.info("✅ Google AI provider configured (as fallback).")
             except Exception as e:
@@ -133,7 +134,7 @@ class AIManager:
             logger.error(f"❌ Flash API error (JSON): {e}")
             self._record_failure("GoogleAI")
             return None
-    
+
     async def _call_openrouter_for_json(self, prompt: str) -> Optional[dict]:
         if not self.settings.OPENROUTER_API_KEY: return None
         model = await self._get_best_free_model()
@@ -178,9 +179,7 @@ class AIManager:
 
     async def get_chat_response(self, prompt: str, system_prompt: str = "") -> str:
         full_prompt = f"""{system_prompt}
-
 User: {prompt}"""
-        
         # --- Level 1: OpenRouter (Primary) ---
         if "OpenRouter" in self.providers and not self._is_blocked("OpenRouter"):
             try:
@@ -254,9 +253,10 @@ User: {prompt}"""
                 else:
                     raise Exception("Empty response received")
             except Exception as e:
-                error_summary = str(e).splitlines()[0]
+                error_summary = str(e).split('
+')[0]
                 report.append(f"""❌ `Google AI`: FAILED
-   `Reason`: {error_summary}""")
+                `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
         else:
             report.append("⚠️ `Google AI`: SKIPPED (no key)")
@@ -271,15 +271,17 @@ User: {prompt}"""
                 else:
                     raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
             except Exception as e:
-                error_summary = str(e).splitlines()[0]
+                error_summary = str(e).split('
+')[0]
                 report.append(f"""❌ `OpenRouter`: FAILED
-   `Reason`: {error_summary}""")
+                `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
         else:
             report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
 
-        return "\n".join(report)
-        
+        return "
+".join(report)
+
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
             logger.warning("Voice transcription skipped: Google AI provider not configured.")
