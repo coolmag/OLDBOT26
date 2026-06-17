@@ -4,8 +4,8 @@ import os
 import time
 from typing import Optional
 import httpx
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+from google.generativeai import types
 from config import Settings
 
 logger = logging.getLogger("ai_manager")
@@ -26,7 +26,8 @@ class AIManager:
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
         if gemini_key:
             try:
-                self.gemini_client = genai.Client(api_key=gemini_key)
+                genai.configure(api_key=gemini_key)
+                genai.GenerativeModel('gemini-pro') # Test call
                 self.providers.append("GoogleAI")
                 logger.info("✅ Google AI provider configured (as fallback).")
             except Exception as e:
@@ -120,11 +121,11 @@ class AIManager:
     async def _call_flash_for_json(self, prompt: str) -> Optional[dict]:
         if self._is_blocked("GoogleAI"): return None
         try:
-            logger.warning("🔄 Falling back to Gemma 4 for Chat")
-            response = self.gemini_client.models.generate_content(
-                model="gemma-4-e2b",
-                contents=full_prompt,
-                config=types.GenerateContentConfig(temperature=0.9)
+            logger.warning("🔄 Falling back to Flash for JSON analysis")
+            model = genai.GenerativeModel("gemini-1.5-flash-latest")
+            response = await model.generate_content_async(
+                prompt,
+                generation_config=types.GenerationConfig(temperature=0.9, response_mime_type="application/json")
             )
             self._clear_failure("GoogleAI")
             return self._parse_json(response.text)
@@ -187,35 +188,20 @@ User: {prompt}"""
                 response = await self._call_openrouter(full_prompt)
                 if response:
                     return response
-                # Если OpenRouter вернул None или пустой ответ, считаем это ошибкой (или просто идем дальше)
             except Exception as e:
                 logger.error(f"❌ OpenRouter (Primary) failed: {e}")
 
-        # --- Level 2: Google AI (Gemma 4 Fallback) ---
+        # --- Level 2: Google AI (Flash Fallback) ---
         if "GoogleAI" in self.providers and not self._is_blocked("GoogleAI"):
             try:
-                logger.warning("🔄 Falling back to Gemma 4 for Chat")
-                response = self.gemini_client.models.generate_content(
-                    model="gemma-4-e2b",
-                    contents=full_prompt,
-                    config=types.GenerateContentConfig(temperature=0.9)
+                logger.warning("🔄 Falling back to Flash for Chat")
+                model = genai.GenerativeModel("gemini-1.5-flash-latest")
+                response = await model.generate_content_async(
+                    full_prompt,
+                    generation_config=types.GenerationConfig(temperature=0.9)
                 )
                 self._clear_failure("GoogleAI")
-                logger.info("💬 Gemma 4 e2b (Chat) responded.")
-                return response.text
-            except Exception as e:
-                logger.error(f"❌ Gemma 4 fallback failed: {e}")
-                self._record_failure("GoogleAI")
-                    
-            # --- Level 3: Google AI (Flash Fallback) ---
-            try:
-                logger.warning("🔄 Falling back to Gemma 4 for Chat")
-                response = self.gemini_client.models.generate_content(
-                    model="gemma-4-e2b",
-                    contents=full_prompt,
-                    config=types.GenerateContentConfig(temperature=0.9)
-                )
-                self._clear_failure("GoogleAI")
+                logger.info("💬 Flash (Chat) responded.")
                 return response.text
             except Exception as e:
                 logger.error(f"❌ Flash fallback failed: {e}")
@@ -261,13 +247,15 @@ User: {prompt}"""
         # --- Test Google AI ---
         if "GoogleAI" in self.providers:
             try:
-                response = self.gemini_client.models.generate_content("test", config=types.GenerateContentConfig(temperature=0.1))
+                model = genai.GenerativeModel("gemini-1.5-flash-latest")
+                response = await model.generate_content_async("test", generation_config=types.GenerationConfig(temperature=0.1))
                 if response.text:
                     report.append("✅ `Google AI`: OK")
                 else:
                     raise Exception("Empty response received")
             except Exception as e:
-                error_summary = str(e).split('\n')[0]
+                error_summary = str(e).split('
+')[0]
                 report.append(f"""❌ `Google AI`: FAILED
    `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
@@ -284,23 +272,25 @@ User: {prompt}"""
                 else:
                     raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
             except Exception as e:
-                error_summary = str(e).split('\n')[0]
+                error_summary = str(e).split('
+')[0]
                 report.append(f"""❌ `OpenRouter`: FAILED
    `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
         else:
             report.append("⚠️ `OpenRouter`: SKIPPED (no key)")
 
-        return "\n".join(report)
+        return "
+".join(report)
         
     async def transcribe_voice(self, voice_bytes: bytearray) -> Optional[str]:
         if "GoogleAI" not in self.providers:
             logger.warning("Voice transcription skipped: Google AI provider not configured.")
             return None
         try:
-            response = self.gemini_client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=[
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            response = await model.generate_content_async(
+                [
                     types.Part.from_bytes(data=bytes(voice_bytes), mime_type='audio/ogg'),
                     "Транскрибируй это голосовое сообщение в текст. Выведи ТОЛЬКО текст, без кавычек."
                 ]
