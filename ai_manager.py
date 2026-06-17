@@ -253,8 +253,7 @@ User: {prompt}"""
                 else:
                     raise Exception("Empty response received")
             except Exception as e:
-                error_summary = str(e).split('
-')[0]
+                error_summary = str(e).splitlines()[0]
                 report.append(f"""❌ `Google AI`: FAILED
                 `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: Google AI test failed: {e}")
@@ -271,8 +270,7 @@ User: {prompt}"""
                 else:
                     raise Exception("Empty response or client-side error. Check OpenRouter key and model availability.")
             except Exception as e:
-                error_summary = str(e).split('
-')[0]
+                error_summary = str(e).splitlines()[0]
                 report.append(f"""❌ `OpenRouter`: FAILED
                 `Reason`: {error_summary}""")
                 logger.error(f"DIAGNOSTIC: OpenRouter test failed: {e}")
