@@ -57,8 +57,12 @@ class YouTubeDownloader:
         self.cobalt_instances = getattr(settings, 'COBALT_INSTANCES', ["https://api.cobalt.tools"])
         
         # Invidious instances
-        invidious_str = getattr(settings, 'INVIDIOUS_INSTANCES', "")
-        self.invidious_instances = [item.strip() for item in invidious_str.split(',') if item.strip()]
+        self.invidious_instances = getattr(settings, 'INVIDIOUS_INSTANCES', [
+            "https://invidious.fdn.fr",
+            "https://yt.artemislena.eu",
+            "https://invidious.protokolla.fi",
+            "https://invidious.privacyredirect.com"
+        ])
 
         # PO Token для обхода BotGuard
         self.po_token = getattr(settings, 'PO_TOKEN', None)
