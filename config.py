@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     TRACK_MIN_DURATION_S: int = 60
     ENABLE_AI_DJ_INTRO: bool = False # Включает/выключает генерацию голосовой подводки от AI DJ перед треком
 
+    @field_validator("COBALT_INSTANCES", "PIPED_INSTANCES", "INVIDIOUS_INSTANCES", mode="before")
+    @classmethod
+    def _parse_instances(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        if isinstance(v, list):
+            return v
+        return []
+
+
 
     @field_validator("YTDLP_COOKIES_FILE", mode="before")
     @classmethod
