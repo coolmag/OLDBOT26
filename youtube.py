@@ -43,7 +43,7 @@ class YouTubeDownloader:
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
         self.semaphore = asyncio.Semaphore(1)
         self.ytmusic = YTMusic()
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)
 
         # Manually parse instances from comma-separated strings
         piped_str = settings.PIPED_INSTANCES
