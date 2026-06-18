@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     JAMENDO_CLIENT_ID: str = ""
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)
     
-    COBALT_INSTANCES: str = "https://api.cobalt.tools"
-    PIPED_INSTANCES: str = "https://pipedapi.tokhmi.xyz,https://pipedapi.smnz.de,https://pipedapi.lunar.icu"
-    INVIDIOUS_INSTANCES: str = "https://invidious.snopyta.org,https://vid.puffyan.us"
+    COBALT_INSTANCES: str = "https://api.cobalt.tools,https://cobalt.api.timelessnesses.me"
+    PIPED_INSTANCES: str = "https://pipedapi.adminforge.de,https://pipedapi.kavin.rocks,https://api-piped.mha.fi,https://pipedapi.drgns.space,https://pipedapi.leptons.xyz"
+    INVIDIOUS_INSTANCES: str = "https://invidious.fdn.fr,https://yt.artemislena.eu,https://invidious.protokolla.fi,https://invidious.privacyredirect.com"
 
     GOOGLE_API_KEY: str = ""
     VK_LOGIN: Optional[str] = None

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 import json
+import urllib.parse
 
 import httpx
 import yt_dlp
@@ -44,25 +45,15 @@ class YouTubeDownloader:
         self.ytmusic = YTMusic()
         self.http_client = httpx.AsyncClient(timeout=30.0)
 
-        # Piped instances (API endpoints, NOT websites)
-        self.piped_instances = getattr(settings, 'PIPED_INSTANCES', [
-            "https://pipedapi.adminforge.de",
-            "https://pipedapi.kavin.rocks",
-            "https://api-piped.mha.fi",
-            "https://pipedapi.drgns.space",
-            "https://pipedapi.leptons.xyz"
-        ])
+        # Manually parse instances from comma-separated strings
+        piped_str = settings.PIPED_INSTANCES
+        self.piped_instances = [item.strip() for item in piped_str.split(',') if item.strip()]
         
-        # Cobalt instances
-        self.cobalt_instances = getattr(settings, 'COBALT_INSTANCES', ["https://api.cobalt.tools"])
+        cobalt_str = settings.COBALT_INSTANCES
+        self.cobalt_instances = [item.strip() for item in cobalt_str.split(',') if item.strip()]
         
-        # Invidious instances
-        self.invidious_instances = getattr(settings, 'INVIDIOUS_INSTANCES', [
-            "https://invidious.fdn.fr",
-            "https://yt.artemislena.eu",
-            "https://invidious.protokolla.fi",
-            "https://invidious.privacyredirect.com"
-        ])
+        invidious_str = settings.INVIDIOUS_INSTANCES
+        self.invidious_instances = [item.strip() for item in invidious_str.split(',') if item.strip()]
 
         # PO Token для обхода BotGuard
         self.po_token = getattr(settings, 'PO_TOKEN', None)
@@ -356,7 +347,6 @@ class YouTubeDownloader:
             files_resp.raise_for_status()
             files = files_resp.json().get("result", [])
          
-            import urllib.parse
             # Фильтруем спам: имя файла должно заканчиваться на .mp3 и быть адекватной длины
             mp3_file = next((f for f in files if f['name'].endswith('.mp3') and len(f['name']) < 100), None)
             if not mp3_file: return DownloadResult(success=False, error_message="No valid MP3 on IA")
