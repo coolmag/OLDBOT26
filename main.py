@@ -22,9 +22,7 @@ from quiz_service import QuizManager
 from radio import RadioManager
 from chat_service import ChatManager
 from cache_service import CacheService
-from db_service import DatabaseService
 from handlers import setup_handlers
-from event_bus import EventBus
 
 logger = logging.getLogger("main")
 
@@ -69,13 +67,6 @@ async def lifespan(app: FastAPI):
     cache = CacheService(settings.CACHE_DB_PATH)
     await cache.initialize()
 
-    # Инициализация шины событий
-    event_bus = EventBus()
-
-    # Инициализация БД
-    db_service = DatabaseService(settings.DB_PATH)
-    await db_service.init_db()
-
     ai_manager = AIManager(settings)
     chat_manager = ChatManager(ai_manager, cache)
     downloader = YouTubeDownloader(settings, cache)
@@ -86,7 +77,7 @@ async def lifespan(app: FastAPI):
     quiz_manager = QuizManager(settings, downloader, chat_manager, cache)
     radio_manager = RadioManager(
         bot=tg_app.bot, settings=settings, downloader=downloader,
-        chat_manager=chat_manager, quiz_manager=quiz_manager, event_bus=event_bus
+        chat_manager=chat_manager, quiz_manager=quiz_manager
     )
 
     tg_app.bot_data['radio_manager'] = radio_manager
@@ -105,10 +96,11 @@ async def lifespan(app: FastAPI):
 
         commands = [
             BotCommand("radio", "🎲 Случайная волна"), BotCommand("play", "🔎 Найти трек"),
-            BotCommand("artist", "🎤 Режим одного исполнителя"), BotCommand("rockdance", "🎸 Плейлист RockDance"),
-            BotCommand("toprock", "🤘 Случайный артист из RockDance"), BotCommand("set_genre", "💿 Сменить жанр (Админ)"),
-            BotCommand("skip", "⏭ Следующий трек"), BotCommand("stop", "🛑 Остановить"),
-            BotCommand("admin", "⚙️ Настройки"), BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
+            BotCommand("plan", "📅 Запланировать меню"), BotCommand("artist", "🎤 Режим одного исполнителя"),
+            BotCommand("rockdance", "🎸 Плейлист RockDance"), BotCommand("toprock", "🤘 Случайный артист из RockDance"),
+            BotCommand("set_genre", "💿 Сменить жанр (Админ)"), BotCommand("skip", "⏭ Следующий трек"),
+            BotCommand("stop", "🛑 Остановить"), BotCommand("admin", "⚙️ Настройки"),
+            BotCommand("quiz", "🎮 Игра 'Угадай мелодию'")
         ]
         await tg_app.bot.set_my_commands(commands)
 
@@ -245,9 +237,3 @@ if not static_dir.exists():
     static_dir.mkdir()
     
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-if __name__ == "__main__":
-    import uvicorn
-    # Railway передает порт в переменной окружения
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -9,13 +9,109 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
-    MessageHandler, filters
+    MessageHandler, filters, ConversationHandler
 )
 
 from ai_personas import PERSONAS
 from cache_service import cache_service
 
+# Imports for Meal Planner
+from meal_planner.menu_generator import generate_menu
+from meal_planner.shopping_list_aggregator import aggregate_shopping_list
+
 logger = logging.getLogger("handlers")
+
+# --- States for Meal Planner ---
+ASK_DAYS, ASK_SHOPPING_LIST = range(10, 12) # Using a higher range to avoid conflicts
+
+# --- Meal Planner Functions ---
+def load_recipes():
+    """Загружает рецепты из JSON файла."""
+    try:
+        with open('meal_planner/recipes.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error("Файл meal_planner/recipes.json не найден!")
+        return []
+    except json.JSONDecodeError:
+        logger.error("Ошибка декодирования JSON в файле meal_planner/recipes.json!")
+        return []
+
+async def plan_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Начинает диалог планирования и спрашивает количество дней."""
+    keyboard = [
+        [
+            InlineKeyboardButton("3 дня", callback_data="plan_3"),
+            InlineKeyboardButton("5 дней", callback_data="plan_5"),
+            InlineKeyboardButton("7 дней", callback_data="plan_7"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("На сколько дней составить меню?", reply_markup=reply_markup)
+    return ASK_DAYS
+
+async def ask_days_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор количества дней, генерирует меню и предлагает создать список покупок."""
+    query = update.callback_query
+    await query.answer()
+    
+    days = int(query.data.split('_')[1])
+    recipes = context.bot_data.get('recipes', [])
+    
+    menu, error = generate_menu(recipes, days)
+    
+    if error:
+        await query.edit_message_text(text=error)
+        return ConversationHandler.END
+
+    context.user_data['menu'] = menu
+
+    response_text = f"✅ **Ваш план меню на {days} дней:**\n\n"
+    for day, recipe in menu.items():
+        response_text += f"**{day}:** {recipe['name']}\n"
+    
+    await query.edit_message_text(text=response_text, parse_mode=ParseMode.MARKDOWN)
+
+    keyboard = [
+        [InlineKeyboardButton("🛒 Сгенерировать список покупок", callback_data="generate_list")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("Теперь я могу создать список покупок для этого меню.", reply_markup=reply_markup)
+    return ASK_SHOPPING_LIST
+
+async def shopping_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Генерирует и выводит итоговый список покупок."""
+    query = update.callback_query
+    await query.answer()
+
+    menu = context.user_data.get('menu')
+    if not menu:
+        await query.edit_message_text(text="Произошла ошибка: меню не найдено. Начните заново с /plan.")
+        return ConversationHandler.END
+        
+    shopping_list, error = aggregate_shopping_list(menu)
+
+    if error:
+        await query.edit_message_text(text=error)
+        return ConversationHandler.END
+
+    response_text = "🛒 **Ваш список покупок:**\n\n"
+    for product, details in shopping_list.items():
+        response_text += f"• **{product}**: {', '.join(details)}\n"
+
+    await query.edit_message_text(text=response_text, parse_mode=ParseMode.MARKDOWN)
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def plan_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отменяет диалог планирования."""
+    await update.message.reply_text("Планирование отменено.")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# --- End of Meal Planner Functions ---
+
 
 # Load genres data for /toprock command
 try:
@@ -389,6 +485,26 @@ async def disk_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def setup_handlers(app: Application):
+    # Meal Planner Handler
+    meal_planner_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("plan", plan_start)],
+        states={
+            ASK_DAYS: [CallbackQueryHandler(ask_days_callback, pattern='^plan_')],
+            ASK_SHOPPING_LIST: [CallbackQueryHandler(shopping_list_callback, pattern='^generate_list$')]
+        },
+        fallbacks=[CommandHandler("cancel", plan_cancel)],
+        map_to_parent={
+            # This ensures that if the user sends a command that is not part of the
+            # meal planner conversation, the main bot handlers can still catch it.
+            ConversationHandler.END: ConversationHandler.END
+        }
+    )
+    app.add_handler(meal_planner_conv_handler)
+    
+    # Load recipes into bot_data
+    app.bot_data['recipes'] = load_recipes()
+
+    # Original Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("play", play_command))
     app.add_handler(CommandHandler("radio", radio_command))
@@ -402,22 +518,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("toprock", toprock_command))
     app.add_handler(CommandHandler("test_ai", test_ai_command))
     app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("stats_failed", stats_failed_command))
     app.add_handler(CommandHandler("disk", disk_command))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(CallbackQueryHandler(button_callback))
-
-async def stats_failed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает статистику неудачных попыток скачивания."""
-    stats = await cache_service.get_failure_stats()
-    if not stats:
-        await update.message.reply_text("✅ Статистика провалов пуста.")
-        return
-    
-    text = "📉 *Топ-10 провалов при скачивании:*\n\n"
-    sorted_stats = sorted(stats.items(), key=lambda x: int(x[1]), reverse=True)[:10]
-    for track_id, count in sorted_stats:
-        text += f"- `{track_id}`: {count} раз\n"
-    
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
