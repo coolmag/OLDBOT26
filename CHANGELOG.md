@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased] - 2026-08-03
+
+### Added
+- **Invidious Downloader**: Integrated Invidious as a primary source for downloading tracks. The new download pipeline is: Invidious -> SoundCloud -> Audius -> InternetArchive -> Jamendo. This enhances reliability by providing a robust fallback mechanism.
+
 ## [Phase 1: Foundation]
 - Создан файл `CHANGELOG.md` для отслеживания изменений.
 - Начало перехода к архитектуре с очередью задач (Celery/Redis) -> Отменено в пользу `asyncio.Queue` (асинхронная очередь в памяти).

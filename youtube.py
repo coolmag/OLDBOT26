@@ -52,6 +52,85 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
+    async def _download_from_invidious(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """Attempts to download a track using a public Invidious instance."""
+        if not self._settings.INVIDIOUS_INSTANCES:
+            logger.warning("⚠️ Invidious skipped: no instances configured.")
+            return DownloadResult(success=False)
+
+        query = f"{track_info.uploader} {track_info.title}".strip()
+        logger.info(f"Attempting download via Invidious for: {query}")
+        
+        # Перемешиваем, чтобы не использовать всегда один и тот же инстанс
+        instances = random.sample(self._settings.INVIDIOUS_INSTANCES, len(self._settings.INVIDIOUS_INSTANCES))
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'}
+
+        for instance in instances:
+            try:
+                logger.info(f"Trying Invidious instance: {instance}")
+                # 1. Search for the video
+                search_url = f"{instance}/api/v1/search?q={query}"
+                search_resp = await self.http_client.get(search_url, headers=headers)
+                search_resp.raise_for_status()
+                
+                search_results = search_resp.json()
+                if not search_results:
+                    logger.warning(f"⚠️ [Invidious] No search results for '{query}' on {instance}")
+                    continue
+                
+                # Find a suitable video (e.g., first non-live video with duration match)
+                video_id = None
+                best_match = None
+                min_duration_diff = float('inf')
+
+                for result in search_results:
+                    if result.get('type') == 'video' and not result.get('liveNow', False) and 'lengthSeconds' in result:
+                        duration_diff = abs(result['lengthSeconds'] - track_info.duration)
+                        if duration_diff < min_duration_diff:
+                            min_duration_diff = duration_diff
+                            best_match = result
+                
+                if best_match and min_duration_diff <= 15:
+                    video_id = best_match['videoId']
+                
+                if not video_id:
+                    logger.warning(f"⚠️ [Invidious] No suitable video found in search results on {instance} (duration mismatch)")
+                    continue
+
+                # 2. Get video details
+                video_info_url = f"{instance}/api/v1/videos/{video_id}"
+                info_resp = await self.http_client.get(video_info_url, headers=headers)
+                info_resp.raise_for_status()
+                video_data = info_resp.json()
+                
+                # 3. Find the best audio stream
+                audio_streams = [
+                    s for s in video_data.get('adaptiveFormats', []) 
+                    if s.get('mimeType', '').startswith('audio/') and 'url' in s
+                ]
+                if not audio_streams:
+                    logger.warning(f"⚠️ [Invidious] No audio streams found for videoId {video_id} on {instance}")
+                    continue
+                
+                # Prefer opus, then mp4, and highest bitrate
+                best_stream = max(audio_streams, key=lambda s: (s['mimeType'].startswith('audio/opus'), int(s.get('bitrate', 0))))
+                audio_url = best_stream.get('url')
+
+                if not audio_url:
+                    logger.error(f"❌ [Invidious] Best stream found but has no URL for videoId {video_id} on {instance}")
+                    continue
+
+                logger.info(f"🔗 [Invidious] Found audio stream via {instance}. Downloading...")
+                download_result = await self._download_direct_http(audio_url, target_path, "Invidious")
+                if download_result.success:
+                    return download_result # Успех, выходим из цикла
+
+            except Exception as e:
+                logger.error(f"❌ Invidious instance {instance} failed: {e}")
+                continue # Пробуем следующий инстанс
+        
+        logger.error("❌ All Invidious instances failed.")
+        return DownloadResult(success=False)
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if kwargs.get('decade'): query = f"{query} {kwargs['decade']}"
@@ -101,8 +180,9 @@ class YouTubeDownloader:
         await self._cleanup_old_downloads()
 
         async with self.semaphore:
-            # Pipeline: SoundCloud -> Audius -> InternetArchive -> Jamendo
+            # Pipeline: Invidious -> SoundCloud -> Audius -> InternetArchive -> Jamendo
             methods = [
+                self._download_from_invidious,
                 self._download_via_soundcloud,
                 self._download_via_audius,
                 self._download_via_internet_archive,
