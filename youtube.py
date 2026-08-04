@@ -71,6 +71,21 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
+    async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
+        """Performs a quick health check on an instance."""
+        try:
+            # For Cobalt, we check the root path, for others, a common API path.
+            check_url = f"{instance.rstrip('/')}{endpoint}"
+            async with self.http_client.stream("HEAD", check_url, timeout=5.0, follow_redirects=True) as response:
+                if 200 <= response.status_code < 400:
+                    logger.debug(f"✅ Instance {instance} is healthy.")
+                    return True
+                logger.warning(f"⚠️ Instance {instance} unhealthy (status: {response.status_code}).")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ Instance {instance} health check failed: {e}")
+            return False
+
     async def search(self, query: str, limit: int = 10, **kwargs) -> List[TrackInfo]:
         if kwargs.get('decade'): query = f"{query} {kwargs['decade']}"
         if not query or not query.strip(): return []
@@ -250,7 +265,15 @@ class YouTubeDownloader:
         logger.info("Attempting Piped...")
         video_id = track_info.identifier
         
-        for instance in self.piped_instances:
+        # Health check all instances in parallel
+        health_checks = [self._check_instance_health(instance, f"/streams/{video_id}") for instance in self.piped_instances]
+        results = await asyncio.gather(*health_checks)
+        healthy_instances = [instance for instance, is_healthy in zip(self.piped_instances, results) if is_healthy]
+
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Piped instances found")
+
+        for instance in healthy_instances:
             try:
                 # Piped API: получаем audio streams
                 resp = await self.http_client.get(f"{instance}/streams/{video_id}", timeout=15.0)
@@ -269,43 +292,62 @@ class YouTubeDownloader:
                 
                 if audio_url:
                     logger.info(f"🔗 Piped instance {instance} found stream")
-                    result = await self._download_direct_http(audio_url, target_path, f"Piped({instance})")
+                    result = await self._download_direct_http(audio_url, target_path, f"Piped({instance.split('//')[1]})")
                     if result.success:
                         return result
             except Exception as e:
-                logger.warning(f"⚠️ Piped instance {instance} failed: {e}")
+                logger.warning(f"⚠️ Piped instance {instance} failed during download: {e}")
                 continue
         
-        return DownloadResult(success=False, error_message="All Piped instances failed")
+        return DownloadResult(success=False, error_message="All healthy Piped instances failed during download")
 
     async def _download_via_cobalt(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         logger.info("Attempting Cobalt...")
         video_url = f"https://www.youtube.com/watch?v={track_info.identifier}"
      
-        # Cobalt v10 требует специфичные заголовки
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
-     
-        for instance in self.cobalt_instances:
+        
+        # Health check all instances in parallel
+        health_checks = [self._check_instance_health(instance) for instance in self.cobalt_instances]
+        results = await asyncio.gather(*health_checks)
+        healthy_instances = [instance for instance, is_healthy in zip(self.cobalt_instances, results) if is_healthy]
+
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Cobalt instances found")
+
+        for instance in healthy_instances:
             try:
                 payload = {"url": video_url, "downloadMode": "audio", "audioFormat": "mp3"}
-                resp = await self.http_client.post(f"{instance}/", json=payload, headers=headers, timeout=20.0)
+                resp = await self.http_client.post(f"{instance.rstrip('/')}/api/json", json=payload, headers=headers, timeout=30.0)
              
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("status") in ["stream", "redirect", "tunnel"]:
                         audio_url = data.get("url")
                         if audio_url:
-                            return await self._download_direct_http(audio_url, target_path, f"Cobalt({instance})")
+                            return await self._download_direct_http(audio_url, target_path, f"Cobalt({instance.split('//')[1]})")
+                else:
+                    logger.warning(f"⚠️ Cobalt instance {instance} returned status {resp.status_code}")
+
             except Exception as e:
-                logger.warning(f"⚠️ Cobalt instance {instance} failed: {e}")
-        return DownloadResult(success=False, error_message="All Cobalt instances failed")
+                logger.warning(f"⚠️ Cobalt instance {instance} failed during download: {e}")
+        
+        return DownloadResult(success=False, error_message="All healthy Cobalt instances failed during download")
 
     async def _download_via_invidious(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         """Скачивание через Invidious instances"""
         logger.info("Attempting Invidious...")
         video_id = track_info.identifier
-        
-        for instance in self.invidious_instances:
+
+        # Health check all instances in parallel
+        health_checks = [self._check_instance_health(instance, f"/api/v1/videos/{video_id}") for instance in self.invidious_instances]
+        results = await asyncio.gather(*health_checks)
+        healthy_instances = [instance for instance, is_healthy in zip(self.invidious_instances, results) if is_healthy]
+
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Invidious instances found")
+
+        for instance in healthy_instances:
             try:
                 resp = await self.http_client.get(f"{instance}/api/v1/videos/{video_id}", timeout=15.0)
                 if resp.status_code != 200:
@@ -323,14 +365,14 @@ class YouTubeDownloader:
                 audio_url = best_stream.get('url')
                 
                 if audio_url:
-                    result = await self._download_direct_http(audio_url, target_path, f"Invidious({instance})")
+                    result = await self._download_direct_http(audio_url, target_path, f"Invidious({instance.split('//')[1]})")
                     if result.success:
                         return result
             except Exception as e:
-                logger.warning(f"⚠️ Invidious instance {instance} failed: {e}")
+                logger.warning(f"⚠️ Invidious instance {instance} failed during download: {e}")
                 continue
         
-        return DownloadResult(success=False, error_message="All Invidious instances failed")
+        return DownloadResult(success=False, error_message="All healthy Invidious instances failed during download")
 
     async def _download_via_internet_archive(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         logger.info("Attempting Internet Archive...")

@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     JAMENDO_CLIENT_ID: str = ""
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)
     
-    COBALT_INSTANCES: str = "https://api.cobalt.tools,https://cobalt.api.timelessnesses.me"
-    PIPED_INSTANCES: str = "https://pipedapi.adminforge.de,https://pipedapi.kavin.rocks,https://api-piped.mha.fi,https://pipedapi.drgns.space,https://pipedapi.leptons.xyz"
-    INVIDIOUS_INSTANCES: str = "https://invidious.fdn.fr,https://yt.artemislena.eu,https://invidious.protokolla.fi,https://invidious.privacyredirect.com"
+    COBALT_INSTANCES: Union[List[str], str, None] = None
+    PIPED_INSTANCES: Union[List[str], str, None] = None
+    INVIDIOUS_INSTANCES: Union[List[str], str, None] = None
 
     GOOGLE_API_KEY: str = ""
     VK_LOGIN: Optional[str] = None
@@ -51,7 +51,6 @@ class Settings(BaseSettings):
     DOWNLOADS_DIR: Path = WRITABLE_DIR / "downloads"
     TEMP_AUDIO_DIR: Path = WRITABLE_DIR / "temp_audio"
     CACHE_DB_PATH: Path = WRITABLE_DIR / "cache.db"
-    DB_PATH: Path = WRITABLE_DIR / "bot.db"
     COOKIES_FILE: Path = WRITABLE_DIR / "cookies.txt"
     YTDLP_COOKIES_FILE: Optional[Path] = None # Новое поле для cookies.txt yt-dlp
     PROXIES_FILE: Path = WRITABLE_DIR / "working_proxies.txt"
@@ -64,6 +63,42 @@ class Settings(BaseSettings):
     TRACK_MIN_DURATION_S: int = 60
     ENABLE_AI_DJ_INTRO: bool = False # Включает/выключает генерацию голосовой подводки от AI DJ перед треком
 
+    @field_validator("COBALT_INSTANCES", "PIPED_INSTANCES", "INVIDIOUS_INSTANCES", mode="before")
+    @classmethod
+    def _parse_instances(cls, v: Any, info: ValidationInfo) -> List[str]:
+        defaults = {
+            "COBALT_INSTANCES": ["https://co.wuk.sh", "https://cobalt.qrcd.cf", "https://cobalt.qrcd.org"],
+            "PIPED_INSTANCES": [
+                "https://pipedapi.tokhmi.xyz",
+                "https://pipedapi.smnz.de",
+                "https://pipedapi.simpleprivacy.fr",
+                "https://pipedapi.qdi.fi",
+                "https://pipedapi.palveluntarjoaja.fi",
+                "https://pipedapi.ggc-project.de",
+                "https://pipedapi.garudalinux.org",
+                "https://pipedapi.frontend.im",
+                "https://pipedapi.drgns.space",
+                "https://piped-api.garudalinux.org"
+            ],
+            "INVIDIOUS_INSTANCES": [
+                "https://inv.zoomerville.com",
+                "https://inv.nadeko.net",
+                "https://invidious.nerdvpn.de",
+                "https://invidious.f5.si",
+                "https://yt.chocolatemoo53.com",
+                "https://invidious.tiekoetter.com",
+            ]
+        }
+        field_name = info.field_name
+        default_list = defaults.get(field_name, [])
+        if v is None: return default_list
+        if isinstance(v, str):
+            v = v.strip()
+            if not v: return default_list
+            try: return json.loads(v)
+            except: return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list): return v
+        return default_list
 
     @field_validator("YTDLP_COOKIES_FILE", mode="before")
     @classmethod
