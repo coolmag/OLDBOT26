@@ -46,14 +46,9 @@ class YouTubeDownloader:
         self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)
 
         # Manually parse instances from comma-separated strings
-        piped_str = settings.PIPED_INSTANCES
-        self.piped_instances = [item.strip() for item in piped_str.split(',') if item.strip()]
-        
-        cobalt_str = settings.COBALT_INSTANCES
-        self.cobalt_instances = [item.strip() for item in cobalt_str.split(',') if item.strip()]
-        
-        invidious_str = settings.INVIDIOUS_INSTANCES
-        self.invidious_instances = [item.strip() for item in invidious_str.split(',') if item.strip()]
+        self.piped_instances = settings.PIPED_INSTANCES
+        self.cobalt_instances = settings.COBALT_INSTANCES
+        self.invidious_instances = settings.INVIDIOUS_INSTANCES
 
         # PO Token для обхода BotGuard
         self.po_token = getattr(settings, 'PO_TOKEN', None)
