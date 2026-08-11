@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_instances(cls, v: Any, info: ValidationInfo) -> List[str]:
         defaults = {
-            "COBALT_INSTANCES": ["https://api.cobalt.tools"],
+            "COBALT_INSTANCES": [],
             "PIPED_INSTANCES": [
                 "https://pipedapi.kavin.rocks",
                 "https://pipedapi.adminforge.de",

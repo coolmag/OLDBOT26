@@ -437,17 +437,17 @@ class YouTubeDownloader:
             'retry_sleep_functions': {'http': 10},
         }
         
-        # PO Token для YouTube
+        # PO Token для YouTube — yt-dlp требует формат: CLIENT.CONTEXT+TOKEN (список)
         if self.po_token and self.visitor_data:
             opts['extractor_args'] = {
                 'youtube': {
                     'player_client': ['mweb', 'web_creator'],
-                    'po_token': self.po_token,
-                    'visitor_data': self.visitor_data
+                    'po_token': [f'mweb.gvs+{self.po_token}', f'web_creator.gvs+{self.po_token}'],
+                    'visitor_data': self.visitor_data,
                 }
             }
         
-        # Cookies
+        # Cookies — если файл пустой или не существует, пропускаем
         if source_name == "SoundCloud":
             cookie_file = self.sc_cookies_path
         elif "YouTube" in source_name:
@@ -455,7 +455,7 @@ class YouTubeDownloader:
         else:
             cookie_file = None
 
-        if cookie_file and cookie_file.exists():
+        if cookie_file and cookie_file.exists() and cookie_file.stat().st_size > 0:
             opts['cookiefile'] = str(cookie_file)
         
         try:

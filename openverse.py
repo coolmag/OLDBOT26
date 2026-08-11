@@ -31,7 +31,6 @@ class OpenverseClient:
                 params={
                     "q": query,
                     "page_size": 3,
-                    "license_type": "all-creative-commons",
                 }
             )
             resp.raise_for_status()
