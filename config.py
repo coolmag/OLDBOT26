@@ -67,26 +67,26 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_instances(cls, v: Any, info: ValidationInfo) -> List[str]:
         defaults = {
-            "COBALT_INSTANCES": ["https://co.wuk.sh", "https://cobalt.qrcd.cf", "https://cobalt.qrcd.org"],
+            "COBALT_INSTANCES": ["https://api.cobalt.tools"],
             "PIPED_INSTANCES": [
-                "https://pipedapi.tokhmi.xyz",
-                "https://pipedapi.smnz.de",
-                "https://pipedapi.simpleprivacy.fr",
-                "https://pipedapi.qdi.fi",
-                "https://pipedapi.palveluntarjoaja.fi",
-                "https://pipedapi.ggc-project.de",
-                "https://pipedapi.garudalinux.org",
-                "https://pipedapi.frontend.im",
+                "https://pipedapi.kavin.rocks",
+                "https://pipedapi.adminforge.de",
+                "https://pipedapi.orangenet.cc",
+                "https://pipedapi.ducks.party",
+                "https://pipedapi.leptons.xyz",
+                "https://piped-api.privacy.com.de",
+                "https://piped-api.codespace.cz",
+                "https://pipedapi.reallyaweso.me",
                 "https://pipedapi.drgns.space",
-                "https://piped-api.garudalinux.org"
+                "https://pipedapi.owo.si"
             ],
             "INVIDIOUS_INSTANCES": [
-                "https://inv.zoomerville.com",
                 "https://inv.nadeko.net",
                 "https://invidious.nerdvpn.de",
                 "https://invidious.f5.si",
-                "https://yt.chocolatemoo53.com",
                 "https://invidious.tiekoetter.com",
+                "https://yt.chocolatemoo53.com",
+                "https://inv.zoomerville.com",
             ]
         }
         field_name = info.field_name
@@ -96,7 +96,7 @@ class Settings(BaseSettings):
             v = v.strip()
             if not v: return default_list
             try: return json.loads(v)
-            except: return [i.strip() for i in v.split(",") if i.strip()]
+            except (json.JSONDecodeError, ValueError): return [i.strip() for i in v.split(",") if i.strip()]
         if isinstance(v, list): return v
         return default_list
 
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     def _assemble_admin_ids(cls, v: Any, info: ValidationInfo) -> List[int]:
         if not v: return []
         try: return [int(i.strip()) for i in str(v).split(",") if i.strip()]
-        except: return []
+        except (ValueError, TypeError): return []
 
 @lru_cache()
 def get_settings() -> Settings:

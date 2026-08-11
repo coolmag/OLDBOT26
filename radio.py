@@ -18,7 +18,7 @@ from config import Settings
 from models import TrackInfo, DownloadResult
 from youtube import YouTubeDownloader
 from chat_service import ChatManager
-from cache_service import cache_service
+from cache_service import CacheService
 from ai_personas import PERSONAS
 
 with open(Path(__file__).parent / "genres.json", "r", encoding="utf-8") as f:
@@ -61,9 +61,9 @@ def get_now_playing_message(track: TrackInfo, genre_name: str) -> str:
     safe_genre = str(genre_name).replace('*', '').replace('_', '').replace('[', '').replace(']', '').replace('`', '')
     return f"{icon} *{safe_title[:40].strip()}* | 👤 {safe_artist[:30].strip()} | ⏱ {format_duration(track.duration)} | 📻 _{safe_genre}_"
 
-async def get_random_catalog_query() -> tuple[str, Optional[str], str]:
+async def get_random_catalog_query(cache: CacheService) -> tuple[str, Optional[str], str]:
     all_items = []
-    
+
     def extract_items(node):
         if isinstance(node, dict):
             if "query" in node or "tracks" in node:
@@ -80,15 +80,15 @@ async def get_random_catalog_query() -> tuple[str, Optional[str], str]:
         elif isinstance(node, list):
             for item in node:
                 extract_items(item)
-    
+
     extract_items(MUSIC_CATALOG)
-    
+
     if not all_items:
         return ("top hits", None, "Random")
 
     # Получаем статистику скипов
-    stats = await cache_service.hgetall("skip_stats")
-    
+    stats = await cache.hgetall("skip_stats")
+
     # Вычисляем веса
     weights = []
     for item in all_items:
@@ -97,7 +97,7 @@ async def get_random_catalog_query() -> tuple[str, Optional[str], str]:
         # Формула: чем больше скипов, тем меньше вес (минимум 0.1, чтобы не исключать полностью)
         weight = max(0.1, 1.0 / (1.0 + skip_count))
         weights.append(weight)
-    
+
     # Случайный выбор с весами
     return random.choices(all_items, weights=weights, k=1)[0]
 
@@ -118,6 +118,7 @@ class RadioSession:
     display_name: str
     chat_type: Optional[str] = None
     decade: Optional[str] = None
+    cache: CacheService = None
     
     is_running: bool = field(init=False, default=False)
     is_temporary_mode: bool = field(init=False, default=False)
@@ -163,7 +164,7 @@ class RadioSession:
 
     async def skip(self):
         # Логируем скип для текущего жанра
-        await cache_service.hincr("skip_stats", self.display_name)
+        await self.cache.hincr("skip_stats", self.display_name)
         self.skip_event.set()
 
     async def set_temporary_query(self, query: str, display_name: str):
@@ -192,7 +193,7 @@ class RadioSession:
     async def _delete_status(self):
         if self.status_message:
             try: await self.status_message.delete()
-            except: pass
+            except Exception: pass
             self.status_message = None
 
     async def _fill_playlist(self, retry_query: str = None):
@@ -289,7 +290,7 @@ class RadioSession:
                     self.is_temporary_mode = False
                     self.failed_downloads_count = 0 
                     
-                    new_query, new_decade, new_display_name = await get_random_catalog_query()
+                    new_query, new_decade, new_display_name = await get_random_catalog_query(self.cache)
                     self.query, self.decade, self.display_name = new_query, new_decade, new_display_name
                     self.playlist.clear()
                     self.last_genre_change = time.time()
@@ -347,7 +348,7 @@ class RadioSession:
                 
                 is_valid_file = False
                 if result and result.success:
-                    if result.is_url or await cache_service.get(f"file_id:{track.identifier}"):
+                    if result.is_url or await self.cache.get(f"file_id:{track.identifier}"):
                         is_valid_file = True
                     elif result.file_path and Path(result.file_path).exists():
                         file_size_mb = Path(result.file_path).stat().st_size / (1024 * 1024)
@@ -395,7 +396,7 @@ class RadioSession:
                                     disable_cache = True
                                 
                                 try: os.unlink(voice_path)
-                                except: pass
+                                except Exception: pass
                     except Exception as e:
                         logger.error(f"DJ Intro merge error: {e}")
 
@@ -442,14 +443,14 @@ class RadioSession:
                 return True
 
             if not disable_cache:
-                cached_file_id = await cache_service.get(f"file_id:{track.identifier}")
+                cached_file_id = await self.cache.get(f"file_id:{track.identifier}")
                 if cached_file_id:
                     try:
                         await self.bot.send_audio(self.chat_id, audio=cached_file_id, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=markup, read_timeout=120, write_timeout=300)
                         await self._delete_status()
                         return True
                     except Exception:
-                        await cache_service.delete(f"file_id:{track.identifier}")
+                        await self.cache.delete(f"file_id:{track.identifier}")
 
             if audio_source and Path(audio_source).exists():
                 with open(audio_source, 'rb') as f:
@@ -465,7 +466,7 @@ class RadioSession:
                         write_timeout=300
                     )
                     if msg.audio and not disable_cache: 
-                        await cache_service.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
+                        await self.cache.set(f"file_id:{track.identifier}", msg.audio.file_id, ttl=None)
                 
                 await self._delete_status()
                 return True
@@ -479,8 +480,8 @@ class RadioSession:
             return False
 
 class RadioManager:
-    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager):
-        self._bot, self._settings, self._downloader, self._chat_manager, self._quiz_manager = bot, settings, downloader, chat_manager, quiz_manager
+    def __init__(self, bot: Bot, settings: Settings, downloader: YouTubeDownloader, chat_manager: ChatManager, quiz_manager: QuizManager, cache: CacheService):
+        self._bot, self._settings, self._downloader, self._chat_manager, self._quiz_manager, self._cache = bot, settings, downloader, chat_manager, quiz_manager, cache
         self._sessions: Dict[int, RadioSession] = {}
         self._locks: Dict[int, asyncio.Lock] = {}
 
@@ -509,8 +510,8 @@ class RadioManager:
                 final_query = query
                 final_display_name = display_name or query
                 
-                if query == "random": 
-                    random_query, random_decade, random_display_name = await get_random_catalog_query()
+                if query == "random":
+                    random_query, random_decade, random_display_name = await get_random_catalog_query(self._cache)
                     final_query = random_query
                     final_display_name = random_display_name
                     if not decade: decade = random_decade # Обновляем decade, если не задан
@@ -524,30 +525,31 @@ class RadioManager:
             # Иначе (если сессии нет или она неактивна), создаем новую, как раньше
             if chat_id in self._sessions: # Очищаем неактивную или зависшую сессию, если есть
                 await self._sessions[chat_id].stop()
-            
+
             final_query = query
             final_display_name = display_name or query
             final_decade = decade
 
-            if query == "random": 
-                random_query, random_decade, random_display_name = await get_random_catalog_query()
+            if query == "random":
+                random_query, random_decade, random_display_name = await get_random_catalog_query(self._cache)
                 final_query = random_query
                 final_display_name = random_display_name
-                if not final_decade: 
+                if not final_decade:
                     final_decade = random_decade
 
             session = RadioSession(
-                chat_id=chat_id, 
-                bot=self._bot, 
-                downloader=self._downloader, 
-                settings=self._settings, 
+                chat_id=chat_id,
+                bot=self._bot,
+                downloader=self._downloader,
+                settings=self._settings,
                 chat_manager=self._chat_manager,
                 quiz_manager=self._quiz_manager,
                 radio_manager=self,
-                query=final_query, 
+                query=final_query,
                 display_name=final_display_name,
-                decade=final_decade, 
-                chat_type=chat_type
+                decade=final_decade,
+                chat_type=chat_type,
+                cache=self._cache
             )
             self._sessions[chat_id] = session
             await session.start()

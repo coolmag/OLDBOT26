@@ -9,7 +9,7 @@ class OpenverseClient:
     A client for interacting with the Openverse API to find and retrieve
     direct audio URLs for tracks. No API key is required.
     """
-    BASE_URL = "https://api.wordpress.org/openverse/v1"
+    BASE_URL = "https://api.openverse.org"
 
     def __init__(self):
         self.http = httpx.AsyncClient(timeout=15)
@@ -27,7 +27,7 @@ class OpenverseClient:
             # to filter out low-quality results like sound effects.
             # licenses = "commercial,modification"
             resp = await self.http.get(
-                f"{self.BASE_URL}/audio/",
+                f"{self.BASE_URL}/v1/audio/",
                 params={
                     "q": query,
                     "page_size": 3,

@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
     quiz_manager = QuizManager(settings, downloader, chat_manager, cache)
     radio_manager = RadioManager(
         bot=tg_app.bot, settings=settings, downloader=downloader,
-        chat_manager=chat_manager, quiz_manager=quiz_manager
+        chat_manager=chat_manager, quiz_manager=quiz_manager, cache=cache
     )
 
     tg_app.bot_data['radio_manager'] = radio_manager
@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+# TODO: Ограничить allow_origins до конкретных доменов в продакшене
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -153,7 +154,7 @@ async def health(request: Request):
         "status": "ok",
         "ai_status": ai_status,
         "redis_status": redis_status,
-        "disk_space": f"{shutil.disk_usage('/').free / (1024**3):.2f} GB free"
+        "disk_space": f"{shutil.disk_usage(str(settings.DOWNLOADS_DIR)).free / (1024**3):.2f} GB free"
     }
 
 
@@ -223,8 +224,12 @@ async def api_ai_dj(prompt: str, request: Request):
     
     tracks = await downloader.search(query=query, limit=15)
     if tracks:
+        bg_tasks = getattr(request.app.state, '_bg_tasks', set())
         for track in tracks[:3]:
-            asyncio.create_task(downloader.download(track.identifier, track))
+            task = asyncio.create_task(downloader.download(track.identifier, track))
+            bg_tasks.add(task)
+            task.add_done_callback(bg_tasks.discard)
+        request.app.state._bg_tasks = bg_tasks
             
     return {"playlist": tracks, "message": ai_message}
 

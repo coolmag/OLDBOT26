@@ -43,7 +43,7 @@ class YouTubeDownloader:
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
         self.semaphore = asyncio.Semaphore(1)
         self.ytmusic = YTMusic()
-        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)  # WARNING: verify=False needed for some proxy instances with self-signed certs
 
         # Manually parse instances from comma-separated strings
         self.piped_instances = settings.PIPED_INSTANCES
@@ -69,9 +69,8 @@ class YouTubeDownloader:
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         """Performs a quick health check on an instance."""
         try:
-            # For Cobalt, we check the root path, for others, a common API path.
             check_url = f"{instance.rstrip('/')}{endpoint}"
-            async with self.http_client.stream("HEAD", check_url, timeout=5.0, follow_redirects=True) as response:
+            async with self.http_client.stream("HEAD", check_url, timeout=3.0, follow_redirects=True) as response:
                 if 200 <= response.status_code < 400:
                     logger.debug(f"✅ Instance {instance} is healthy.")
                     return True
@@ -106,7 +105,7 @@ class YouTubeDownloader:
             try:
                 parts = duration_text.split(':')
                 duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-            except: duration = 0
+            except (ValueError, IndexError): duration = 0
             if not (self._settings.TRACK_MIN_DURATION_S <= duration <= self._settings.TRACK_MAX_DURATION_S): continue
             track = TrackInfo(
                 identifier=video_id, 
@@ -135,14 +134,15 @@ class YouTubeDownloader:
         async with self.semaphore:
             # Multi-source pipeline
             methods = [
-                self._download_via_jamendo,
-                self._download_via_openverse,
-                self._download_via_audius,
+                self._download_via_ytdlp_youtube,
+                self._download_via_soundcloud,
                 self._download_via_piped,
                 self._download_via_cobalt,
                 self._download_via_invidious,
+                self._download_via_jamendo,
+                self._download_via_openverse,
+                self._download_via_audius,
                 self._download_via_internet_archive,
-                self._download_via_soundcloud,
             ]
             
             for method in methods:
@@ -199,10 +199,10 @@ class YouTubeDownloader:
             return True, ""
         except Exception as e: return False, f"ffprobe validation failed: {e}"
 
-    async def _download_direct_http(self, audio_url: str, target_path: Path, source_name: str) -> DownloadResult:
+    async def _download_direct_http(self, audio_url: str, target_path: Path, source_name: str, extra_headers: dict = None) -> DownloadResult:
         temp_path = target_path.with_suffix('.part')
         try:
-            async with self.http_client.stream("GET", audio_url, follow_redirects=True) as response:
+            async with self.http_client.stream("GET", audio_url, follow_redirects=True, headers=extra_headers) as response:
                 response.raise_for_status()
                 with open(temp_path, "wb") as f:
                     async for chunk in response.aiter_bytes(): f.write(chunk)
@@ -251,9 +251,15 @@ class YouTubeDownloader:
                 if 300 <= stream_resp.status_code < 400 and 'Location' in stream_resp.headers:
                     audio_url = stream_resp.headers['Location']
                     return await self._download_direct_http(audio_url, target_path, "Audius")
-        except Exception as e: 
+        except Exception as e:
             logger.error(f"Audius failed: {e}")
         return DownloadResult(success=False, error_message="Audius failed")
+
+    async def _download_via_ytdlp_youtube(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """Прямое скачивание с YouTube через yt-dlp (cookies + PO Token)"""
+        logger.info("Attempting yt-dlp direct YouTube...")
+        video_url = f"https://www.youtube.com/watch?v={track_info.identifier}"
+        return await self._download_with_yt_dlp(video_url, target_path, "YouTube")
 
     async def _download_via_piped(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
         """Скачивание через Piped instances (YouTube proxy)"""
@@ -390,7 +396,7 @@ class YouTubeDownloader:
          
             safe_name = urllib.parse.quote(mp3_file['name'])
             audio_url = f"https://archive.org/download/{identifier}/{safe_name}"
-            return await self._download_direct_http(audio_url, target_path, "InternetArchive")
+            return await self._download_direct_http(audio_url, target_path, "InternetArchive", extra_headers={"User-Agent": "AuroraBot/1.0"})
         except Exception as e:
             logger.error(f"Internet Archive failed: {e}")
             return DownloadResult(success=False, error_message=str(e))
@@ -426,8 +432,7 @@ class YouTubeDownloader:
                 'preferredquality': '192'
             }],
             'force_ipv4': True,
-            'sleep_interval': 5,
-            'max_sleep_interval': 15,
+            'socket_timeout': 30,
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
         }

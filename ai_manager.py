@@ -21,6 +21,10 @@ class AIManager:
             "OpenRouter": {"count": 0, "blocked_until": 0},
             "GoogleAI": {"count": 0, "blocked_until": 0}
         }
+
+        # Cache for best free model (TTL 1 hour)
+        self._best_free_model: Optional[str] = None
+        self._best_free_model_ts: float = 0
         
         # Setup Google AI
         gemini_key = os.getenv("GEMINI_API_KEY") or getattr(self.settings, 'GOOGLE_API_KEY', '') or os.getenv("GOOGLE_API_KEY")
@@ -65,6 +69,10 @@ class AIManager:
             tracker["blocked_until"] = 0
 
     async def _get_best_free_model(self) -> str:
+        # Return cached model if fresh (TTL 1 hour)
+        if self._best_free_model and (time.time() - self._best_free_model_ts < 3600):
+            return self._best_free_model
+
         try:
             logger.info("📡 Fetching latest free models from OpenRouter...")
             response = await self.openrouter_client.get("https://openrouter.ai/api/v1/models", timeout=10)
@@ -72,13 +80,15 @@ class AIManager:
             # Фильтруем модели с нулевой ценой за prompt
             free_models = [m['id'] for m in data['data'] if m['pricing']['prompt'] == '0']
             if free_models:
+                self._best_free_model = free_models[0]
+                self._best_free_model_ts = time.time()
                 logger.info(f"✅ Found free model: {free_models[0]}")
                 return free_models[0]
         except Exception as e:
             logger.error(f"❌ Failed to fetch free models: {e}")
-        
+
         # Резервный вариант, если список получить не удалось
-        return "google/gemini-2.0-flash-lite-preview-02-05:free"
+        return self._best_free_model or "google/gemini-2.0-flash-lite-preview-02-05:free"
 
     async def analyze_message(self, text: str) -> dict:
         prompt = f"""Analyze this user message for a Telegram music bot.

@@ -62,3 +62,8 @@ test_*.py
 data*.txt
 *.log
 *.sqlite3
+
+# Cookies (SECURITY: never commit session cookies)
+cookies.txt
+soundcloud_cookies.txt
+youtube_cookies.txt

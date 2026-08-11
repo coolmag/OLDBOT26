@@ -89,5 +89,3 @@ class CacheService:
         else:
             return self._in_memory_cache.get(name, {})
 
-# Глобальный экземпляр для использования в других модулях
-cache_service = CacheService()

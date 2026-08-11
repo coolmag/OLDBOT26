@@ -13,7 +13,6 @@ from telegram.ext import (
 )
 
 from ai_personas import PERSONAS
-from cache_service import cache_service
 
 # Imports for Meal Planner
 from meal_planner.menu_generator import generate_menu
@@ -184,16 +183,19 @@ async def _do_play(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE,
 
 async def _do_radio(chat_id: int, query: str, context: ContextTypes.DEFAULT_TYPE, chat_type: str | None = None, display_name: Optional[str] = None):
     effective_query = query or "random"
-    
+
     # Use the provided display_name or default to the query
     final_display_name = display_name or (query if query else "Случайная волна")
     await context.bot.send_message(chat_id, f"🎧 Включаю радио-волну: *{final_display_name}*", parse_mode=ParseMode.MARKDOWN)
-    
+
     radio_manager = context.bot_data['radio_manager']
-    import asyncio
-    
-    # Pass all relevant info to the manager
-    asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=chat_type, display_name=final_display_name))
+
+    # Pass all relevant info to the manager (store task reference to prevent GC)
+    task = asyncio.create_task(radio_manager.start(chat_id, effective_query, chat_type=chat_type, display_name=final_display_name))
+    if not hasattr(context.application, '_bg_tasks'):
+        context.application._bg_tasks = set()
+    context.application._bg_tasks.add(task)
+    task.add_done_callback(context.application._bg_tasks.discard)
 
 async def _do_chat_reply(chat_id: int, text: str, user_name: str, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -238,7 +240,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if not is_correct:
             try: await message.set_reaction(reaction="👎")
-            except: pass
+            except Exception: pass
         
         return
 
@@ -264,8 +266,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_mgr = context.bot_data['quiz_manager']
-    import asyncio
-    asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot)) 
+    task = asyncio.create_task(quiz_mgr.start_quiz(update.effective_chat.id, context.bot))
+    if not hasattr(context.application, '_bg_tasks'):
+        context.application._bg_tasks = set()
+    context.application._bg_tasks.add(task)
+    task.add_done_callback(context.application._bg_tasks.discard) 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎧 Aurora AI DJ. Включаю радио или ищу треки. С чего начнем?")
@@ -454,7 +459,8 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows skip statistics."""
-    stats = await cache_service.hgetall("skip_stats")
+    cache = context.application.cache
+    stats = await cache.hgetall("skip_stats")
     if not stats:
         await update.message.reply_text("📊 Статистика пропусков пока пуста.")
         return
