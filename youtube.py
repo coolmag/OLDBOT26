@@ -436,6 +436,8 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
+            # 👇 ИСПРАВЛЕНИЕ: Правильный формат для принудительного использования Node.js
+            'js_runtimes': {'node': {}}, 
         }
         
         # ==========================================
@@ -466,8 +468,12 @@ class YouTubeDownloader:
         
         # Если есть куки, используем web-клиентов (ios/android_vr не поддерживают куки).
         if cookie_file and "YouTube" in source_name:
-            youtube_args['player_client'] = ['web', 'mweb', 'web_creator']
+            # По умолчанию используем только 'web', чтобы не было ошибок с PO Token
+            youtube_args['player_client'] = ['web']
+            
+            # Добавляем mweb и web_creator ТОЛЬКО если есть валидный PO Token
             if is_valid_token:
+                youtube_args['player_client'].extend(['mweb', 'web_creator'])
                 youtube_args['po_token'] = [
                     f'web.gvs+{self.po_token}', 
                     f'mweb.gvs+{self.po_token}', 
