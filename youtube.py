@@ -22,7 +22,17 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v7.1 - 2026 Bypass & JS Runtime Fix).
+    🎵 Aurora Downloader Engine (v7.0 - Multi-Source Bypass).
+    
+    Download pipeline:
+    1. Jamendo (API)
+    2. Openverse (API)
+    3. Audius (API)
+    4. Piped (YouTube proxy)
+    5. Cobalt (YouTube proxy)
+    6. Invidious (YouTube proxy)
+    7. Internet Archive (fallback)
+    8. SoundCloud (yt-dlp with PO Token)
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -33,19 +43,12 @@ class YouTubeDownloader:
         self._settings.DOWNLOADS_DIR.mkdir(exist_ok=True)
         self.semaphore = asyncio.Semaphore(1)
         self.ytmusic = YTMusic()
-        
-        # Для proxy-инстансов с self-signed certs
-        import ssl
-        import certifi
-        self.http_client = httpx.AsyncClient(
-            timeout=30.0, 
-            verify=certifi.where()
-        )
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)  # WARNING: verify=False needed for some proxy instances with self-signed certs
 
-        # Instances
-        self.piped_instances = getattr(settings, 'PIPED_INSTANCES', [])
-        self.cobalt_instances = getattr(settings, 'COBALT_INSTANCES', [])
-        self.invidious_instances = getattr(settings, 'INVIDIOUS_INSTANCES', [])
+        # Manually parse instances from comma-separated strings
+        self.piped_instances = settings.PIPED_INSTANCES
+        self.cobalt_instances = settings.COBALT_INSTANCES
+        self.invidious_instances = settings.INVIDIOUS_INSTANCES
 
         # PO Token для обхода BotGuard
         self.po_token = getattr(settings, 'PO_TOKEN', None)
@@ -55,19 +58,21 @@ class YouTubeDownloader:
         self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
         self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
 
-        if getattr(settings, 'YT_COOKIES', None):
+        if self._settings.YT_COOKIES:
             with open(self.yt_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.YT_COOKIES)
         
-        if getattr(settings, 'SC_COOKIES', None):
+        if self._settings.SC_COOKIES:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
+        """Performs a quick health check on an instance."""
         try:
             check_url = f"{instance.rstrip('/')}{endpoint}"
             async with self.http_client.stream("HEAD", check_url, timeout=3.0, follow_redirects=True) as response:
                 if 200 <= response.status_code < 400:
+                    logger.debug(f"✅ Instance {instance} is healthy.")
                     return True
                 logger.warning(f"⚠️ Instance {instance} unhealthy (status: {response.status_code}).")
                 return False
@@ -101,11 +106,7 @@ class YouTubeDownloader:
                 parts = duration_text.split(':')
                 duration = sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
             except (ValueError, IndexError): duration = 0
-            
-            min_dur = getattr(self._settings, 'TRACK_MIN_DURATION_S', 60)
-            max_dur = getattr(self._settings, 'TRACK_MAX_DURATION_S', 600)
-            if not (min_dur <= duration <= max_dur): continue
-            
+            if not (self._settings.TRACK_MIN_DURATION_S <= duration <= self._settings.TRACK_MAX_DURATION_S): continue
             track = TrackInfo(
                 identifier=video_id, 
                 title=item.get('title'), 
@@ -131,6 +132,7 @@ class YouTubeDownloader:
         await self._cleanup_old_downloads()
 
         async with self.semaphore:
+            # Multi-source pipeline
             methods = [
                 self._download_via_ytdlp_youtube,
                 self._download_via_soundcloud,
@@ -172,6 +174,7 @@ class YouTubeDownloader:
                     file_size = file.stat().st_size
                     file.unlink()
                     total_size -= file_size
+                    logger.info(f"🗑️ Deleted: {file.name}")
                 except Exception as e:
                     logger.error(f"Failed to delete {file.name}: {e}")
 
@@ -207,29 +210,36 @@ class YouTubeDownloader:
             valid, msg = await asyncio.to_thread(self._validate_audio, temp_path)
             if not valid:
                 temp_path.unlink(missing_ok=True)
+                logger.warning(f"⚠️ [{source_name}] Rejected: {msg}")
                 return DownloadResult(success=False, error_message=f"Quality check failed: {msg}")
 
             temp_path.rename(target_path)
+            logger.info(f"✅ Success via {source_name}!")
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
+            logger.error(f"❌ [{source_name}] HTTP download failed: {e}")
             if temp_path.exists(): temp_path.unlink(missing_ok=True)
             return DownloadResult(success=False, error_message=str(e))
 
     async def _download_via_jamendo(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting Jamendo...")
         audio_url = await self.jamendo.search_track_url(track_info.uploader, track_info.title)
         if audio_url: return await self._download_direct_http(audio_url, target_path, "Jamendo")
         return DownloadResult(success=False, error_message="Not found on Jamendo")
 
     async def _download_via_openverse(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting Openverse...")
         query = f"{track_info.uploader} {track_info.title}".strip()
         audio_url = await self.openverse.search_track_url(query)
         if audio_url: return await self._download_direct_http(audio_url, target_path, "Openverse")
         return DownloadResult(success=False, error_message="Not found on Openverse")
 
     async def _download_via_audius(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting Audius...")
         query = f"{track_info.uploader} {track_info.title}".strip()
         try:
-            resp = await self.http_client.get(f"https://api.audius.co/v1/tracks/search?query={urllib.parse.quote(query)}&app_name=AuroraDownloader")
+            # Audius требует app_name
+            resp = await self.http_client.get(f"https://api.audius.co/v1/tracks/search?query={query}&app_name=AuroraDownloader")
             resp.raise_for_status()
             data = resp.json().get("data", [])
             if not data: return DownloadResult(success=False, error_message="No results on Audius")
@@ -239,78 +249,134 @@ class YouTubeDownloader:
                 track_id = best_match['id']
                 stream_resp = await self.http_client.get(f"https://api.audius.co/v1/tracks/{track_id}/stream?app_name=AuroraDownloader", follow_redirects=False)
                 if 300 <= stream_resp.status_code < 400 and 'Location' in stream_resp.headers:
-                    return await self._download_direct_http(stream_resp.headers['Location'], target_path, "Audius")
+                    audio_url = stream_resp.headers['Location']
+                    return await self._download_direct_http(audio_url, target_path, "Audius")
         except Exception as e:
             logger.error(f"Audius failed: {e}")
         return DownloadResult(success=False, error_message="Audius failed")
 
     async def _download_via_ytdlp_youtube(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """Прямое скачивание с YouTube через yt-dlp (cookies + PO Token)"""
+        logger.info("Attempting yt-dlp direct YouTube...")
         video_url = f"https://www.youtube.com/watch?v={track_info.identifier}"
         return await self._download_with_yt_dlp(video_url, target_path, "YouTube")
 
     async def _download_via_piped(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """Скачивание через Piped instances (YouTube proxy)"""
+        logger.info("Attempting Piped...")
         video_id = track_info.identifier
+        
+        # Health check all instances in parallel
         health_checks = [self._check_instance_health(instance, f"/streams/{video_id}") for instance in self.piped_instances]
         results = await asyncio.gather(*health_checks)
         healthy_instances = [instance for instance, is_healthy in zip(self.piped_instances, results) if is_healthy]
 
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Piped instances found")
+
         for instance in healthy_instances:
             try:
+                # Piped API: получаем audio streams
                 resp = await self.http_client.get(f"{instance}/streams/{video_id}", timeout=15.0)
-                if resp.status_code != 200: continue
-                audio_streams = resp.json().get("audioStreams", [])
-                if not audio_streams: continue
+                if resp.status_code != 200:
+                    continue
+                    
+                data = resp.json()
+                audio_streams = data.get("audioStreams", [])
+                
+                if not audio_streams:
+                    continue
+                
+                # Выбираем лучший audio stream
                 best_stream = max(audio_streams, key=lambda x: x.get('bitrate', 0))
                 audio_url = best_stream.get('url')
+                
                 if audio_url:
+                    logger.info(f"🔗 Piped instance {instance} found stream")
                     result = await self._download_direct_http(audio_url, target_path, f"Piped({instance.split('//')[1]})")
-                    if result.success: return result
+                    if result.success:
+                        return result
             except Exception as e:
+                logger.warning(f"⚠️ Piped instance {instance} failed during download: {e}")
                 continue
-        return DownloadResult(success=False, error_message="All healthy Piped instances failed")
+        
+        return DownloadResult(success=False, error_message="All healthy Piped instances failed during download")
 
     async def _download_via_cobalt(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting Cobalt...")
         video_url = f"https://www.youtube.com/watch?v={track_info.identifier}"
+     
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        
+        # Health check all instances in parallel
         health_checks = [self._check_instance_health(instance) for instance in self.cobalt_instances]
         results = await asyncio.gather(*health_checks)
         healthy_instances = [instance for instance, is_healthy in zip(self.cobalt_instances, results) if is_healthy]
+
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Cobalt instances found")
 
         for instance in healthy_instances:
             try:
                 payload = {"url": video_url, "downloadMode": "audio", "audioFormat": "mp3"}
                 resp = await self.http_client.post(f"{instance.rstrip('/')}/api/json", json=payload, headers=headers, timeout=30.0)
+             
                 if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("status") in ["stream", "redirect", "tunnel"] and data.get("url"):
-                        return await self._download_direct_http(data.get("url"), target_path, f"Cobalt({instance.split('//')[1]})")
+                    if data.get("status") in ["stream", "redirect", "tunnel"]:
+                        audio_url = data.get("url")
+                        if audio_url:
+                            return await self._download_direct_http(audio_url, target_path, f"Cobalt({instance.split('//')[1]})")
+                else:
+                    logger.warning(f"⚠️ Cobalt instance {instance} returned status {resp.status_code}")
+
             except Exception as e:
-                continue
-        return DownloadResult(success=False, error_message="All healthy Cobalt instances failed")
+                logger.warning(f"⚠️ Cobalt instance {instance} failed during download: {e}")
+        
+        return DownloadResult(success=False, error_message="All healthy Cobalt instances failed during download")
 
     async def _download_via_invidious(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """Скачивание через Invidious instances"""
+        logger.info("Attempting Invidious...")
         video_id = track_info.identifier
+
+        # Health check all instances in parallel
         health_checks = [self._check_instance_health(instance, f"/api/v1/videos/{video_id}") for instance in self.invidious_instances]
         results = await asyncio.gather(*health_checks)
         healthy_instances = [instance for instance, is_healthy in zip(self.invidious_instances, results) if is_healthy]
 
+        if not healthy_instances:
+            return DownloadResult(success=False, error_message="No healthy Invidious instances found")
+
         for instance in healthy_instances:
             try:
                 resp = await self.http_client.get(f"{instance}/api/v1/videos/{video_id}", timeout=15.0)
-                if resp.status_code != 200: continue
-                audio_streams = resp.json().get("adaptiveFormats", [])
+                if resp.status_code != 200:
+                    continue
+                    
+                data = resp.json()
+                audio_streams = data.get("adaptiveFormats", [])
+                
+                # Фильтруем audio streams
                 audio_only = [s for s in audio_streams if 'audio' in s.get('type', '').lower()]
-                if not audio_only: continue
+                if not audio_only:
+                    continue
+                
                 best_stream = max(audio_only, key=lambda x: x.get('bitrate', 0))
                 audio_url = best_stream.get('url')
+                
                 if audio_url:
                     result = await self._download_direct_http(audio_url, target_path, f"Invidious({instance.split('//')[1]})")
-                    if result.success: return result
+                    if result.success:
+                        return result
             except Exception as e:
+                logger.warning(f"⚠️ Invidious instance {instance} failed during download: {e}")
                 continue
-        return DownloadResult(success=False, error_message="All healthy Invidious instances failed")
+        
+        return DownloadResult(success=False, error_message="All healthy Invidious instances failed during download")
 
     async def _download_via_internet_archive(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        logger.info("Attempting Internet Archive...")
         query = f"{track_info.uploader} {track_info.title}"
         try:
             params = {"q": f"{query} AND mediatype:(audio) AND format:(mp3)", "fl[]": ["identifier", "title"], "output": "json", "rows": "1"}
@@ -324,23 +390,31 @@ class YouTubeDownloader:
             files_resp.raise_for_status()
             files = files_resp.json().get("result", [])
          
+            # Фильтруем спам: имя файла должно заканчиваться на .mp3 и быть адекватной длины
             mp3_file = next((f for f in files if f['name'].endswith('.mp3') and len(f['name']) < 100), None)
             if not mp3_file: return DownloadResult(success=False, error_message="No valid MP3 on IA")
          
-            audio_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(mp3_file['name'])}"
+            safe_name = urllib.parse.quote(mp3_file['name'])
+            audio_url = f"https://archive.org/download/{identifier}/{safe_name}"
             return await self._download_direct_http(audio_url, target_path, "InternetArchive", extra_headers={"User-Agent": "AuroraBot/1.0"})
         except Exception as e:
+            logger.error(f"Internet Archive failed: {e}")
             return DownloadResult(success=False, error_message=str(e))
 
     async def _download_via_soundcloud(self, track_info: TrackInfo, target_path: Path) -> DownloadResult:
+        """SoundCloud через yt-dlp с PO Token"""
+        logger.info("Attempting SoundCloud (yt-dlp with PO Token)...")
         if not track_info.title: return DownloadResult(success=False, error_message="No title")
+        
         search_queries = [
             f"scsearch1:{track_info.uploader} - {track_info.title}",
             f"scsearch1:{track_info.title}"
         ]
+        
         for query in search_queries:
             result = await self._download_with_yt_dlp(query, target_path, "SoundCloud")
             if result.success: return result
+        
         return DownloadResult(success=False, error_message="SoundCloud failed")
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
@@ -361,14 +435,14 @@ class YouTubeDownloader:
             'socket_timeout': 30,
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
-            'ignoreerrors': True, # Важно: не прерывать, если один из клиентов отдал ошибку
+            'ignoreerrors': True,
+            # 👇 ПРИНУДИТЕЛЬНО используем установленный в Docker Node.js для решения JS-задач
+            'js_runtimes': ['node'], 
         }
         
         # ==========================================
-        # 🛡️ ИСПРАВЛЕНИЕ 2026: Защита от невалидных PO-токенов
+        # 🛡️ ИСПРАВЛЕНИЕ 2026: Клиенты и PO-токены
         # ==========================================
-        # YouTube требует base64url (символы '-', '_' вместо '+', '/' и без '=').
-        # Если токен невалидный, yt-dlp отбрасывает ВСЕ форматы и выдает "Requested format is not available".
         is_valid_token = (
             self.po_token and 
             self.visitor_data and 
@@ -378,13 +452,14 @@ class YouTubeDownloader:
             "/" not in str(self.po_token)
         )
 
-        # Приоритет отдаем клиентам, которые реже требуют PO Token
+        # 👇 Убираем 'tv' (YouTube включил для него SABR-only, ссылок нет).
+        # Оставляем ios и android_vr — они лучше всего обходят блокировки без токенов.
         youtube_args = {
-            'player_client': ['android_music', 'android_vr', 'ios', 'tv'],
+            'player_client': ['ios', 'android_vr'],
         }
 
         if is_valid_token:
-            # Если токен валидный, подключаем веб-клиентов
+            # Если есть валидный токен, добавляем web/mweb
             youtube_args['player_client'].extend(['mweb', 'web_creator', 'web'])
             youtube_args['po_token'] = [
                 f'web.gvs+{self.po_token}', 
@@ -395,10 +470,16 @@ class YouTubeDownloader:
             
         opts['extractor_args'] = {'youtube': youtube_args}
 
-        # Cookies
+        # ==========================================
+        # 🍪 ИСПРАВЛЕНИЕ COOKIES
+        # ==========================================
+        # yt-dlp пропускает ios и android_vr, если передан cookiefile, 
+        # так как эти клиенты не поддерживают куки.
+        # Поэтому для YouTube мы НЕ передаем куки, если нет валидного PO Token для web клиентов.
         if source_name == "SoundCloud":
             cookie_file = self.sc_cookies_path
-        elif "YouTube" in source_name:
+        elif "YouTube" in source_name and is_valid_token:
+            # Передаем куки только если есть валидный токен для web/mweb
             cookie_file = self.yt_cookies_path
         else:
             cookie_file = None
