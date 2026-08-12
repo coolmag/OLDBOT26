@@ -3,7 +3,7 @@ import importlib
 import shutil
 from pathlib import Path
 
-# 🛠️ КРИТИЧЕСКИЙ ФИКС: Копируем yt-dlp-ejs ДО импорта yt_dlp!
+# Копируем yt-dlp-ejs ДО импорта yt_dlp
 try:
     _ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
     _ejs_file = Path(_ejs_mod.__file__)
@@ -14,7 +14,6 @@ try:
 except Exception:
     pass
 
-# Все остальные импорты (включая List)
 import asyncio
 import logging
 import dataclasses
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v9.3 - Plugin Pre-load + Size Limit + Typing Fix).
+    🎵 Aurora Downloader Engine (v10.0 - TV Embedded + QuickJS + No Cookies).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -55,25 +54,20 @@ class YouTubeDownloader:
         self.cobalt_instances = settings.COBALT_INSTANCES
         self.invidious_instances = settings.INVIDIOUS_INSTANCES
 
-        self.po_token = getattr(settings, 'PO_TOKEN', None)
-        self.visitor_data = getattr(settings, 'VISITOR_DATA', None)
-
-        self.yt_cookies_path = self._settings.WRITABLE_DIR / "youtube_cookies.txt"
+        # Куки больше не используются для YouTube, так как IP Railway блокируется
         self.sc_cookies_path = self._settings.WRITABLE_DIR / "soundcloud_cookies.txt"
-
-        if self._settings.YT_COOKIES:
-            with open(self.yt_cookies_path, "w", encoding="utf-8") as f:
-                f.write(self._settings.YT_COOKIES)
-        
         if self._settings.SC_COOKIES:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
+        qjs_path = shutil.which("qjs") or shutil.which("quickjs")
         node_path = shutil.which("node") or shutil.which("nodejs")
-        if node_path:
+        if qjs_path:
+            logger.info(f"✅ QuickJS found at: {qjs_path} (Perfect for Docker OOM limits)")
+        elif node_path:
             logger.info(f"✅ Node.js found at: {node_path}")
         else:
-            logger.error("❌ Node.js NOT found in PATH!")
+            logger.warning("⚠️ No JS runtime found. YouTube downloads may fail.")
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         try:
@@ -179,7 +173,6 @@ class YouTubeDownloader:
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
         min_dur = getattr(self._settings, 'TRACK_MIN_DURATION_S', 60)
         
-        # Защита от гигантских FLAC/WAV файлов (например, с Internet Archive)
         file_size_mb = path.stat().st_size / (1024 * 1024)
         if file_size_mb > 50:
             return False, f"File too large ({file_size_mb:.1f} MB > 50 MB)"
@@ -370,42 +363,27 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            'js_runtimes': {'node': {}}, 
+            # 👇 QuickJS идеален для Docker (не падает от OOM). Node как запасной вариант.
+            'js_runtimes': {'quickjs': {}, 'node': {}}, 
         }
         
         cookie_file = None
         if source_name == "SoundCloud":
             if self.sc_cookies_path.exists() and self.sc_cookies_path.stat().st_size > 0:
                 cookie_file = self.sc_cookies_path
-        elif "YouTube" in source_name:
-            if self.yt_cookies_path.exists() and self.yt_cookies_path.stat().st_size > 0:
-                cookie_file = self.yt_cookies_path
 
         if cookie_file:
             opts['cookiefile'] = str(cookie_file)
 
-        is_valid_token = (
-            self.po_token and 
-            self.visitor_data and 
-            len(str(self.po_token)) > 50 and 
-            "=" not in str(self.po_token) and
-            "+" not in str(self.po_token) and
-            "/" not in str(self.po_token)
-        )
-
         youtube_args = {}
         
-        if cookie_file and "YouTube" in source_name:
-            youtube_args['player_client'] = ['web', 'mweb', 'web_creator']
-            if is_valid_token:
-                youtube_args['po_token'] = [
-                    f'web.gvs+{self.po_token}', 
-                    f'mweb.gvs+{self.po_token}', 
-                    f'web_creator.gvs+{self.po_token}'
-                ]
-                youtube_args['visitor_data'] = self.visitor_data
-        else:
-            youtube_args['player_client'] = ['web_embedded']
+        # 👇 ИСПРАВЛЕНИЕ 2026: Используем tv_embedded как ОСНОВНОЙ клиент БЕЗ кук!
+        # YouTube считает Smart TV доверенными устройствами и не требует "Sign in to confirm" 
+        # даже с IP дата-центров (Railway/AWS). Для аудио он отдает обычные M4A/OPUS стримы.
+        if "YouTube" in source_name:
+            youtube_args['player_client'] = ['tv_embedded', 'web_embedded']
+            # Отключаем player_skip, чтобы tv_embedded точно отработал
+            youtube_args['player_skip'] = [] 
 
         opts['extractor_args'] = {'youtube': youtube_args}
 
@@ -422,16 +400,8 @@ class YouTubeDownloader:
             final_temp_path.rename(target_path)
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
-            error_msg = str(e)
-            if "cookies are no longer valid" in error_msg.lower() or "sign in to confirm" in error_msg.lower():
-                if cookie_file and "YouTube" in source_name:
-                    logger.warning("⚠️ YouTube cookies expired! Deleting cookie file...")
-                    try:
-                        cookie_file.unlink(missing_ok=True)
-                    except Exception:
-                        pass
             logger.error(f"❌ [{source_name}] yt-dlp failed: {e}")
-            return DownloadResult(success=False, error_message=error_msg)
+            return DownloadResult(success=False, error_message=str(e))
 
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
