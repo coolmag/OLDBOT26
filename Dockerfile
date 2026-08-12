@@ -1,13 +1,23 @@
 # Этап 1: Базовый образ с Python
 FROM python:3.11-slim
 
+# Отключаем буферизацию вывода Python, чтобы логи сразу попадали в консоль Railway
+ENV PYTHONUNBUFFERED=1
+
 # Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Обновляем список пакетов и устанавливаем FFmpeg
-# RUN apt-get update говорит системе обновить список доступных пакетов
-# RUN apt-get install -y ffmpeg устанавливает сам FFmpeg. Ключ -y автоматически отвечает "да" на все запросы.
-RUN apt-get update && apt-get install -y ffmpeg nodejs
+# Обновляем список пакетов и устанавливаем FFmpeg + современный Node.js
+# Node.js 20.x критически важен для yt-dlp, чтобы он мог решать JavaScript-задачи YouTube
+# (ошибки Signature solving failed и n challenge solving failed исчезнут)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Копируем файл с зависимостями в контейнер
 COPY requirements.txt .
@@ -20,7 +30,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Открываем порт, на котором будет работать бот. 
-# Yandex Serverless Containers ожидают, что приложение будет слушать порт 8080.
+# Railway (и Yandex Serverless) ожидают, что приложение будет слушать порт 8080.
 EXPOSE 8080
 
 # Команда для запуска приложения при старте контейнера
