@@ -1,18 +1,30 @@
+import sys
+import importlib
+import shutil
+from pathlib import Path
+
+# 🛠️ КРИТИЧЕСКИЙ ФИКС: Копируем yt-dlp-ejs ДО импорта yt_dlp!
+# Если делать это в __init__, yt-dlp уже будет импортирован и не увидит плагин.
+try:
+    _ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
+    _ejs_file = Path(_ejs_mod.__file__)
+    _source_plugin_root = _ejs_file.parent.parent 
+    _target_plugin_root = Path.home() / ".yt-dlp" / "plugins" / "yt_dlp_plugins"
+    if not _target_plugin_root.exists():
+        shutil.copytree(_source_plugin_root, _target_plugin_root)
+except Exception:
+    pass
+
 import asyncio
 import logging
 import dataclasses
 import random
 import subprocess
-import sys
-import importlib
-import shutil
-from pathlib import Path
-from typing import List, Optional, Tuple
 import json
 import urllib.parse
 
 import httpx
-import yt_dlp
+import yt_dlp # Теперь yt-dlp точно увидит yt-dlp-ejs и Node.js!
 from ytmusicapi import YTMusic
 
 from config import Settings
@@ -25,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v9.1 - Node.js Only + Web Clients + Auto-Cookie Cleanup).
+    🎵 Aurora Downloader Engine (v9.2 - Plugin Pre-load + Size Limit).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -56,20 +68,12 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
-        # 🛠️ RUNTIME FIX: Жесткая привязка yt-dlp-ejs в ~/.yt-dlp/plugins/
-        try:
-            ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
-            ejs_file = Path(ejs_mod.__file__)
-            source_plugin_root = ejs_file.parent.parent 
-            
-            target_plugin_root = Path.home() / ".yt-dlp" / "plugins" / "yt_dlp_plugins"
-            
-            if not target_plugin_root.exists():
-                logger.info("🔧 Manually linking yt-dlp-ejs to ~/.yt-dlp/plugins/...")
-                shutil.copytree(source_plugin_root, target_plugin_root)
-                logger.info("✅ yt-dlp-ejs successfully linked!")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not link yt-dlp-ejs: {e}")
+        # Диагностика Node.js
+        node_path = shutil.which("node") or shutil.which("nodejs")
+        if node_path:
+            logger.info(f"✅ Node.js found at: {node_path}")
+        else:
+            logger.error("❌ Node.js NOT found in PATH!")
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         try:
@@ -174,6 +178,12 @@ class YouTubeDownloader:
 
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
         min_dur = getattr(self._settings, 'TRACK_MIN_DURATION_S', 60)
+        
+        # 👇 ИСПРАВЛЕНИЕ: Отклоняем файлы больше 50 МБ (защита от гигантских FLAC с Internet Archive)
+        file_size_mb = path.stat().st_size / (1024 * 1024)
+        if file_size_mb > 50:
+            return False, f"File too large ({file_size_mb:.1f} MB > 50 MB)"
+
         try:
             duration_str = subprocess.check_output(
                 ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
@@ -360,7 +370,7 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # 👇 Оставляем ТОЛЬКО Node.js. Deno убран, так как убивается OOM Killer в Railway (returncode: -9)
+            # 👇 Оставляем ТОЛЬКО Node.js.
             'js_runtimes': {'node': {}}, 
         }
         
@@ -386,8 +396,7 @@ class YouTubeDownloader:
 
         youtube_args = {}
         
-        # 👇 ИСПРАВЛЕНИЕ: Убираем android (попал под SABR-only streaming experiment).
-        # Оставляем только web-клиенты, которые уважают куки и не отдают SABR-стримы.
+        # 👇 Используем только web-клиенты (они уважают куки).
         if cookie_file and "YouTube" in source_name:
             youtube_args['player_client'] = ['web', 'mweb', 'web_creator']
             if is_valid_token:
@@ -420,7 +429,7 @@ class YouTubeDownloader:
             # 👇 АВТО-ОЧИСТКА: Если YouTube пишет, что куки невалидны — удаляем их
             if "cookies are no longer valid" in error_msg.lower() or "sign in to confirm" in error_msg.lower():
                 if cookie_file and "YouTube" in source_name:
-                    logger.warning("⚠️ YouTube cookies expired! Deleting cookie file to prevent blocking...")
+                    logger.warning("⚠️ YouTube cookies expired! Deleting cookie file...")
                     try:
                         cookie_file.unlink(missing_ok=True)
                     except Exception:
