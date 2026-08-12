@@ -3,10 +3,11 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-# 1. Устанавливаем FFmpeg, Node.js и DENO (Deno критичен для yt-dlp в Docker)
+# 1. Устанавливаем FFmpeg, Node.js, UNZIP (нужен для Deno) и сам Deno
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
+    unzip \
     ca-certificates \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -17,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 
-# 2. Устанавливаем зависимости (yt-dlp и yt-dlp-ejs уже есть у тебя)
+# 2. Устанавливаем Python-зависимости (yt-dlp и yt-dlp-ejs)
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
