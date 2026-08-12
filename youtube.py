@@ -3,8 +3,6 @@ import logging
 import dataclasses
 import random
 import subprocess
-import sys
-import importlib.util
 from pathlib import Path
 from typing import List, Optional, Tuple
 import json
@@ -22,9 +20,16 @@ from openverse import OpenverseClient
 
 logger = logging.getLogger(__name__)
 
+# Проверка наличия плагина EJS при старте модуля
+try:
+    import yt_dlp_plugins.extractor.ejs
+    logger.info("✅ yt-dlp-ejs plugin loaded successfully. JS challenges will be solved.")
+except ImportError:
+    logger.warning("⚠️ yt-dlp-ejs plugin NOT found. YouTube downloads may fail with 'Signature solving failed'.")
+
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v7.3 - Runtime JS Solver Fix).
+    🎵 Aurora Downloader Engine (v7.5 - Final PyPI + EJS Fix).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -54,15 +59,6 @@ class YouTubeDownloader:
         if self._settings.SC_COOKIES:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
-
-        # 🛠️ RUNTIME FIX: Принудительная установка yt-dlp-ejs, если pip его пропустил при сборке
-        if importlib.util.find_spec("yt_dlp_ejs") is None:
-            logger.warning("⚠️ yt-dlp-ejs not found. Installing at runtime to fix YouTube Signature solving...")
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp-ejs", "--quiet", "--disable-pip-version-check"])
-                logger.info("✅ yt-dlp-ejs installed successfully at runtime.")
-            except Exception as e:
-                logger.error(f"❌ Failed to install yt-dlp-ejs: {e}")
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         try:
@@ -353,8 +349,7 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # 👇 Явно указываем использовать Node.js для решения JS-задач
-            'js_runtimes': {'node': {}}, 
+            # Убираем js_runtimes, чтобы yt-dlp сам нашел node и yt-dlp-ejs
         }
         
         cookie_file = None
@@ -379,9 +374,8 @@ class YouTubeDownloader:
 
         youtube_args = {}
         
-        # 👇 ИСПРАВЛЕНИЕ: Убираем mediaconnect (его нет) и tv (DRM).
+        # Используем только стабильные клиенты
         if cookie_file and "YouTube" in source_name:
-            # С куками используем web. yt-dlp-ejs расшифрует ссылки, куки снимут 429.
             youtube_args['player_client'] = ['web']
             if is_valid_token:
                 youtube_args['player_client'].extend(['mweb', 'web_creator'])
@@ -392,7 +386,6 @@ class YouTubeDownloader:
                 ]
                 youtube_args['visitor_data'] = self.visitor_data
         else:
-            # Если кук нет, пробуем мобильные
             youtube_args['player_client'] = ['ios', 'android_vr', 'web_embedded']
 
         opts['extractor_args'] = {'youtube': youtube_args}
