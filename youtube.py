@@ -4,7 +4,6 @@ import shutil
 from pathlib import Path
 
 # 🛠️ КРИТИЧЕСКИЙ ФИКС: Копируем yt-dlp-ejs ДО импорта yt_dlp!
-# Если делать это в __init__, yt-dlp уже будет импортирован и не увидит плагин.
 try:
     _ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
     _ejs_file = Path(_ejs_mod.__file__)
@@ -15,6 +14,7 @@ try:
 except Exception:
     pass
 
+# Все остальные импорты (включая List)
 import asyncio
 import logging
 import dataclasses
@@ -22,9 +22,10 @@ import random
 import subprocess
 import json
 import urllib.parse
+from typing import List, Optional, Tuple
 
 import httpx
-import yt_dlp # Теперь yt-dlp точно увидит yt-dlp-ejs и Node.js!
+import yt_dlp
 from ytmusicapi import YTMusic
 
 from config import Settings
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v9.2 - Plugin Pre-load + Size Limit).
+    🎵 Aurora Downloader Engine (v9.3 - Plugin Pre-load + Size Limit + Typing Fix).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -68,7 +69,6 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
-        # Диагностика Node.js
         node_path = shutil.which("node") or shutil.which("nodejs")
         if node_path:
             logger.info(f"✅ Node.js found at: {node_path}")
@@ -179,7 +179,7 @@ class YouTubeDownloader:
     def _validate_audio(self, path: Path) -> Tuple[bool, str]:
         min_dur = getattr(self._settings, 'TRACK_MIN_DURATION_S', 60)
         
-        # 👇 ИСПРАВЛЕНИЕ: Отклоняем файлы больше 50 МБ (защита от гигантских FLAC с Internet Archive)
+        # Защита от гигантских FLAC/WAV файлов (например, с Internet Archive)
         file_size_mb = path.stat().st_size / (1024 * 1024)
         if file_size_mb > 50:
             return False, f"File too large ({file_size_mb:.1f} MB > 50 MB)"
@@ -370,7 +370,6 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # 👇 Оставляем ТОЛЬКО Node.js.
             'js_runtimes': {'node': {}}, 
         }
         
@@ -396,7 +395,6 @@ class YouTubeDownloader:
 
         youtube_args = {}
         
-        # 👇 Используем только web-клиенты (они уважают куки).
         if cookie_file and "YouTube" in source_name:
             youtube_args['player_client'] = ['web', 'mweb', 'web_creator']
             if is_valid_token:
@@ -407,7 +405,6 @@ class YouTubeDownloader:
                 ]
                 youtube_args['visitor_data'] = self.visitor_data
         else:
-            # Без кук YouTube блокирует IP Railway. Оставляем только web_embedded.
             youtube_args['player_client'] = ['web_embedded']
 
         opts['extractor_args'] = {'youtube': youtube_args}
@@ -426,7 +423,6 @@ class YouTubeDownloader:
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
             error_msg = str(e)
-            # 👇 АВТО-ОЧИСТКА: Если YouTube пишет, что куки невалидны — удаляем их
             if "cookies are no longer valid" in error_msg.lower() or "sign in to confirm" in error_msg.lower():
                 if cookie_file and "YouTube" in source_name:
                     logger.warning("⚠️ YouTube cookies expired! Deleting cookie file...")
