@@ -436,7 +436,7 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # 👇 ИСПРАВЛЕНИЕ: Правильный формат для принудительного использования Node.js
+            # 👇 ЯВНО указываем yt-dlp использовать Node.js для расшифровки YouTube
             'js_runtimes': {'node': {}}, 
         }
         
