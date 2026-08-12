@@ -3,22 +3,18 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-# 1. Устанавливаем FFmpeg, Node.js, UNZIP (нужен для Deno) и сам Deno
+# 1. Устанавливаем FFmpeg и QuickJS (легкий JS-движок, не падает от OOM в Railway)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
-    unzip \
     ca-certificates \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    # Устанавливаем Deno 2.x (предпочтительный рантайм для yt-dlp в Docker)
-    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    quickjs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# 2. Устанавливаем Python-зависимости (yt-dlp и yt-dlp-ejs)
+# 2. Устанавливаем зависимости (yt-dlp и yt-dlp-ejs)
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
