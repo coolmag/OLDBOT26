@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v9.0 - Deno + EJS Hardlink + Web Clients).
+    🎵 Aurora Downloader Engine (v9.1 - Node.js Only + Web Clients + Auto-Cookie Cleanup).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -57,7 +57,6 @@ class YouTubeDownloader:
                 f.write(self._settings.SC_COOKIES)
 
         # 🛠️ RUNTIME FIX: Жесткая привязка yt-dlp-ejs в ~/.yt-dlp/plugins/
-        # Это нужно, потому что pip иногда не регистрирует entry_points в Docker.
         try:
             ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
             ejs_file = Path(ejs_mod.__file__)
@@ -361,8 +360,8 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # 👇 Явно указываем Deno и Node.js для решения JS-задач
-            'js_runtimes': {'deno': {}, 'node': {}}, 
+            # 👇 Оставляем ТОЛЬКО Node.js. Deno убран, так как убивается OOM Killer в Railway (returncode: -9)
+            'js_runtimes': {'node': {}}, 
         }
         
         cookie_file = None
@@ -387,11 +386,11 @@ class YouTubeDownloader:
 
         youtube_args = {}
         
-        # 👇 ИСПРАВЛЕНИЕ 2026: Убираем ios (он игнорирует куки). Используем web, mweb, android.
+        # 👇 ИСПРАВЛЕНИЕ: Убираем android (попал под SABR-only streaming experiment).
+        # Оставляем только web-клиенты, которые уважают куки и не отдают SABR-стримы.
         if cookie_file and "YouTube" in source_name:
-            youtube_args['player_client'] = ['web', 'mweb', 'android']
+            youtube_args['player_client'] = ['web', 'mweb', 'web_creator']
             if is_valid_token:
-                youtube_args['player_client'].extend(['web_creator'])
                 youtube_args['po_token'] = [
                     f'web.gvs+{self.po_token}', 
                     f'mweb.gvs+{self.po_token}', 
@@ -399,8 +398,8 @@ class YouTubeDownloader:
                 ]
                 youtube_args['visitor_data'] = self.visitor_data
         else:
-            # Если кук нет, пробуем android и web_embedded
-            youtube_args['player_client'] = ['android', 'web_embedded']
+            # Без кук YouTube блокирует IP Railway. Оставляем только web_embedded.
+            youtube_args['player_client'] = ['web_embedded']
 
         opts['extractor_args'] = {'youtube': youtube_args}
 
@@ -417,8 +416,17 @@ class YouTubeDownloader:
             final_temp_path.rename(target_path)
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
+            error_msg = str(e)
+            # 👇 АВТО-ОЧИСТКА: Если YouTube пишет, что куки невалидны — удаляем их
+            if "cookies are no longer valid" in error_msg.lower() or "sign in to confirm" in error_msg.lower():
+                if cookie_file and "YouTube" in source_name:
+                    logger.warning("⚠️ YouTube cookies expired! Deleting cookie file to prevent blocking...")
+                    try:
+                        cookie_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
             logger.error(f"❌ [{source_name}] yt-dlp failed: {e}")
-            return DownloadResult(success=False, error_message=str(e))
+            return DownloadResult(success=False, error_message=error_msg)
 
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
         try:
