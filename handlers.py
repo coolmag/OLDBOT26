@@ -4,14 +4,20 @@ import logging
 import random
 import re
 import json
+import warnings
 from pathlib import Path
+from typing import Optional
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode, ChatType
+from telegram.warnings import PTBUserWarning
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
     MessageHandler, filters, ConversationHandler
 )
+
+# Отключаем надоедливое предупреждение PTB о CallbackQueryHandler и per_message=False
+warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 from ai_personas import PERSONAS
 
