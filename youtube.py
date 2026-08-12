@@ -3,8 +3,6 @@ import logging
 import dataclasses
 import random
 import subprocess
-import sys
-import importlib
 import shutil
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -12,7 +10,6 @@ import json
 import urllib.parse
 
 import httpx
-import yt_dlp
 from ytmusicapi import YTMusic
 
 from config import Settings
@@ -25,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v7.6 - Hardlink Plugin & Node Check).
+    🎵 Aurora Downloader Engine (v8.0 - Standalone Binary Fix).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -56,34 +53,31 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
-        # 🛠️ RUNTIME DIAGNOSTICS & FIX
-        # 1. Проверяем, есть ли Node.js в PATH (без него yt-dlp не сможет решать JS)
-        node_path = shutil.which("node") or shutil.which("nodejs")
-        if not node_path:
-            logger.error("❌ CRITICAL: Node.js not found in PATH! yt-dlp cannot solve YouTube JS challenges.")
-        else:
-            logger.info(f"✅ Node.js found in system at: {node_path}")
+        # 🛠️ Инициализация бинарника yt-dlp
+        self.yt_dlp_bin_path = self._ensure_yt_dlp_binary()
 
-        # 2. Жесткая привязка yt-dlp-ejs (обход сломанных entry_points)
+    def _ensure_yt_dlp_binary(self) -> str:
+        """Скачивает официальный бинарник yt-dlp для Linux, если он отсутствует."""
+        bin_path = self._settings.WRITABLE_DIR / "yt-dlp"
+        
+        # Если бинарник уже скачан, используем его
+        if bin_path.exists():
+            return str(bin_path)
+        
+        logger.info("📥 Downloading yt-dlp standalone binary for Linux...")
+        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+        
         try:
-            ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
-            ejs_file = Path(ejs_mod.__file__)
-            # Находим корень папки yt_dlp_plugins
-            source_plugin_root = ejs_file.parent.parent 
-            
-            # Целевая папка, которую yt-dlp читает ВСЕГДА
-            target_plugin_root = Path.home() / ".yt-dlp" / "plugins" / "yt_dlp_plugins"
-            
-            if not target_plugin_root.exists():
-                logger.info("🔧 yt-dlp entry_points ignored. Manually linking yt-dlp-ejs to ~/.yt-dlp/plugins/...")
-                shutil.copytree(source_plugin_root, target_plugin_root)
-                logger.info("✅ yt-dlp-ejs successfully linked! YouTube Signature solving fixed.")
-            else:
-                logger.info("✅ yt-dlp-ejs is already linked in ~/.yt-dlp/plugins/.")
-        except ImportError:
-            logger.error("❌ CRITICAL: yt-dlp-ejs is NOT installed in the environment!")
+            # Скачиваем бинарник
+            subprocess.check_call(["curl", "-L", url, "-o", str(bin_path)])
+            # Делаем его исполняемым
+            subprocess.check_call(["chmod", "+x", str(bin_path)])
+            logger.info("✅ yt-dlp binary downloaded successfully. EJS solver is built-in.")
+            return str(bin_path)
         except Exception as e:
-            logger.error(f"❌ Failed to link yt-dlp-ejs: {e}")
+            logger.error(f"❌ Failed to download yt-dlp binary: {e}")
+            # Фоллбек на системный yt-dlp из pip
+            return shutil.which("yt-dlp") or "yt-dlp"
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         try:
@@ -356,27 +350,29 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="SoundCloud failed")
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
+        """
+        Запуск yt-dlp через официальный бинарник (CLI).
+        Это 100% обходит проблемы с Python API и entry_points в Docker/Railway.
+        """
         temp_path = target_path.with_name(f"{target_path.stem}_{source_name}_temp")
         temp_path_str = str(temp_path)
         
-        opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': temp_path_str,
-            'quiet': True,
-            'noprogress': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192'
-            }],
-            'force_ipv4': True,
-            'socket_timeout': 30,
-            'retries': 3,
-            'retry_sleep_functions': {'http': 10},
-            'ignoreerrors': True,
-            # js_runtimes убран, yt-dlp сам найдет node и ~/.yt-dlp/plugins/
-        }
-        
+        cmd = [
+            self.yt_dlp_bin_path,
+            '-f', 'bestaudio/best',
+            '-o', temp_path_str,
+            '--quiet',
+            '--no-progress',
+            '--force-ipv4',
+            '--socket-timeout', '30',
+            '--retries', '3',
+            '--ignore-errors',
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '192K',
+        ]
+
+        # Cookies
         cookie_file = None
         if source_name == "SoundCloud":
             if self.sc_cookies_path.exists() and self.sc_cookies_path.stat().st_size > 0:
@@ -386,8 +382,9 @@ class YouTubeDownloader:
                 cookie_file = self.yt_cookies_path
 
         if cookie_file:
-            opts['cookiefile'] = str(cookie_file)
+            cmd.extend(['--cookies', str(cookie_file)])
 
+        # Extractor Args
         is_valid_token = (
             self.po_token and 
             self.visitor_data and 
@@ -397,27 +394,35 @@ class YouTubeDownloader:
             "/" not in str(self.po_token)
         )
 
-        youtube_args = {}
-        
-        if cookie_file and "YouTube" in source_name:
-            youtube_args['player_client'] = ['web']
-            if is_valid_token:
-                youtube_args['player_client'].extend(['mweb', 'web_creator'])
-                youtube_args['po_token'] = [
-                    f'web.gvs+{self.po_token}', 
-                    f'mweb.gvs+{self.po_token}', 
-                    f'web_creator.gvs+{self.po_token}'
-                ]
-                youtube_args['visitor_data'] = self.visitor_data
-        else:
-            youtube_args['player_client'] = ['ios', 'android_vr', 'web_embedded']
+        if "YouTube" in source_name:
+            if cookie_file:
+                player_client = "web"
+                if is_valid_token:
+                    player_client += ",mweb,web_creator"
+                    cmd.extend(['--extractor-args', f"youtube:po_token=web.gvs+{self.po_token};mweb.gvs+{self.po_token};web_creator.gvs+{self.po_token};visitor_data={self.visitor_data}"])
+            else:
+                player_client = "ios,android_vr,web_embedded"
+            
+            cmd.extend(['--extractor-args', f"youtube:player_client={player_client}"])
 
-        opts['extractor_args'] = {'youtube': youtube_args}
+        cmd.append(url_or_query)
 
         try:
-            await asyncio.to_thread(yt_dlp.YoutubeDL(opts).download, [url_or_query])
+            logger.info(f"🚀 Running yt-dlp CLI...")
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='ignore')
+                logger.error(f"❌ [{source_name}] yt-dlp CLI failed: {error_msg}")
+                return DownloadResult(success=False, error_message=error_msg[:500])
+
             final_temp_path = temp_path.with_suffix('.mp3') if temp_path.with_suffix('.mp3').exists() else temp_path
-            if not final_temp_path.exists(): raise FileNotFoundError("yt-dlp did not produce output")
+            if not final_temp_path.exists(): raise FileNotFoundError("yt-dlp CLI did not produce output")
 
             valid, msg = await asyncio.to_thread(self._validate_audio, final_temp_path)
             if not valid:
@@ -427,7 +432,7 @@ class YouTubeDownloader:
             final_temp_path.rename(target_path)
             return DownloadResult(success=True, file_path=target_path)
         except Exception as e:
-            logger.error(f"❌ [{source_name}] yt-dlp failed: {e}")
+            logger.error(f"❌ [{source_name}] yt-dlp execution error: {e}")
             return DownloadResult(success=False, error_message=str(e))
 
     async def _get_track_info_from_ytmusic(self, video_id: str) -> Optional[TrackInfo]:
