@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module=r"telegram\..*")
 import asyncio
 import logging
 import shutil
