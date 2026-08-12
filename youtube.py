@@ -4,6 +4,7 @@ import dataclasses
 import random
 import subprocess
 import shutil
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 import json
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v8.0 - Standalone Binary Fix).
+    🎵 Aurora Downloader Engine (v8.1 - Auto-Cookie Cleanup & iOS Bypass).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -53,14 +54,12 @@ class YouTubeDownloader:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
 
-        # 🛠️ Инициализация бинарника yt-dlp
         self.yt_dlp_bin_path = self._ensure_yt_dlp_binary()
 
     def _ensure_yt_dlp_binary(self) -> str:
-        """Скачивает официальный бинарник yt-dlp для Linux, если он отсутствует."""
+        """Скачивает официальный бинарник yt-dlp для Linux."""
         bin_path = self._settings.WRITABLE_DIR / "yt-dlp"
         
-        # Если бинарник уже скачан, используем его
         if bin_path.exists():
             return str(bin_path)
         
@@ -68,15 +67,12 @@ class YouTubeDownloader:
         url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
         
         try:
-            # Скачиваем бинарник
             subprocess.check_call(["curl", "-L", url, "-o", str(bin_path)])
-            # Делаем его исполняемым
             subprocess.check_call(["chmod", "+x", str(bin_path)])
             logger.info("✅ yt-dlp binary downloaded successfully. EJS solver is built-in.")
             return str(bin_path)
         except Exception as e:
             logger.error(f"❌ Failed to download yt-dlp binary: {e}")
-            # Фоллбек на системный yt-dlp из pip
             return shutil.which("yt-dlp") or "yt-dlp"
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
@@ -350,10 +346,7 @@ class YouTubeDownloader:
         return DownloadResult(success=False, error_message="SoundCloud failed")
 
     async def _download_with_yt_dlp(self, url_or_query: str, target_path: Path, source_name: str) -> DownloadResult:
-        """
-        Запуск yt-dlp через официальный бинарник (CLI).
-        Это 100% обходит проблемы с Python API и entry_points в Docker/Railway.
-        """
+        """Запуск yt-dlp через официальный бинарник (CLI)."""
         temp_path = target_path.with_name(f"{target_path.stem}_{source_name}_temp")
         temp_path_str = str(temp_path)
         
@@ -395,13 +388,15 @@ class YouTubeDownloader:
         )
 
         if "YouTube" in source_name:
+            # 👇 ИСПРАВЛЕНИЕ: Без кук используем ios и android_music (они реже блокируются)
             if cookie_file:
                 player_client = "web"
                 if is_valid_token:
                     player_client += ",mweb,web_creator"
                     cmd.extend(['--extractor-args', f"youtube:po_token=web.gvs+{self.po_token};mweb.gvs+{self.po_token};web_creator.gvs+{self.po_token};visitor_data={self.visitor_data}"])
             else:
-                player_client = "ios,android_vr,web_embedded"
+                # ios и android_music работают без кук и реже попадают под 429
+                player_client = "ios,android_music,web_embedded"
             
             cmd.extend(['--extractor-args', f"youtube:player_client={player_client}"])
 
@@ -415,11 +410,21 @@ class YouTubeDownloader:
                 stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
+            
+            stderr_text = stderr.decode('utf-8', errors='ignore')
+
+            # 👇 АВТО-ОЧИСТКА: Если YouTube пишет, что куки невалидны — удаляем их
+            if "cookies are no longer valid" in stderr_text.lower() or "sign in to confirm" in stderr_text.lower():
+                if cookie_file and "YouTube" in source_name:
+                    logger.warning("⚠️ YouTube cookies expired! Deleting cookie file to prevent blocking...")
+                    try:
+                        cookie_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
             if process.returncode != 0:
-                error_msg = stderr.decode('utf-8', errors='ignore')
-                logger.error(f"❌ [{source_name}] yt-dlp CLI failed: {error_msg}")
-                return DownloadResult(success=False, error_message=error_msg[:500])
+                logger.error(f"❌ [{source_name}] yt-dlp CLI failed: {stderr_text[:500]}")
+                return DownloadResult(success=False, error_message=stderr_text[:500])
 
             final_temp_path = temp_path.with_suffix('.mp3') if temp_path.with_suffix('.mp3').exists() else temp_path
             if not final_temp_path.exists(): raise FileNotFoundError("yt-dlp CLI did not produce output")
