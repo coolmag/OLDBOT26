@@ -1,11 +1,9 @@
 FROM python:3.11-slim
 
-# Отключаем буферизацию, чтобы логи сразу шли в Railway
 ENV PYTHONUNBUFFERED=1
-
 WORKDIR /app
 
-# 1. Устанавливаем FFmpeg и Node.js 20.x (критично для yt-dlp)
+# 1. Устанавливаем FFmpeg и Node.js 20.x
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
@@ -15,17 +13,13 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Проверяем, что Node.js точно встал в систему
-RUN node --version
-
 COPY requirements.txt .
 
-# 2. Устанавливаем основные зависимости
+# 2. Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. ПРИНУДИТЕЛЬНО ставим yt-dlp-ejs (решатель JS-задач YouTube)
-# Это гарантирует, что он точно установится, даже если pip его пропустил
-RUN pip install --no-cache-dir --force-reinstall yt-dlp-ejs
+# 3. ПРИНУДИТЕЛЬНО переустанавливаем yt-dlp-ejs, чтобы он зарегистрировал свои скрипты для yt-dlp
+RUN pip install --no-cache-dir --upgrade --force-reinstall yt-dlp-ejs
 
 COPY . .
 
