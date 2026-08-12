@@ -3,6 +3,9 @@ import logging
 import dataclasses
 import random
 import subprocess
+import sys
+import importlib
+import shutil
 from pathlib import Path
 from typing import List, Optional, Tuple
 import json
@@ -20,16 +23,9 @@ from openverse import OpenverseClient
 
 logger = logging.getLogger(__name__)
 
-# Проверка наличия плагина EJS при старте модуля
-try:
-    import yt_dlp_plugins.extractor.ejs
-    logger.info("✅ yt-dlp-ejs plugin loaded successfully. JS challenges will be solved.")
-except ImportError:
-    logger.warning("⚠️ yt-dlp-ejs plugin NOT found. YouTube downloads may fail with 'Signature solving failed'.")
-
 class YouTubeDownloader:
     """
-    🎵 Aurora Downloader Engine (v7.5 - Final PyPI + EJS Fix).
+    🎵 Aurora Downloader Engine (v7.6 - Hardlink Plugin & Node Check).
     """
 
     def __init__(self, settings: Settings, cache_service: CacheService):
@@ -59,6 +55,35 @@ class YouTubeDownloader:
         if self._settings.SC_COOKIES:
             with open(self.sc_cookies_path, "w", encoding="utf-8") as f:
                 f.write(self._settings.SC_COOKIES)
+
+        # 🛠️ RUNTIME DIAGNOSTICS & FIX
+        # 1. Проверяем, есть ли Node.js в PATH (без него yt-dlp не сможет решать JS)
+        node_path = shutil.which("node") or shutil.which("nodejs")
+        if not node_path:
+            logger.error("❌ CRITICAL: Node.js not found in PATH! yt-dlp cannot solve YouTube JS challenges.")
+        else:
+            logger.info(f"✅ Node.js found in system at: {node_path}")
+
+        # 2. Жесткая привязка yt-dlp-ejs (обход сломанных entry_points)
+        try:
+            ejs_mod = importlib.import_module("yt_dlp_plugins.extractor.ejs")
+            ejs_file = Path(ejs_mod.__file__)
+            # Находим корень папки yt_dlp_plugins
+            source_plugin_root = ejs_file.parent.parent 
+            
+            # Целевая папка, которую yt-dlp читает ВСЕГДА
+            target_plugin_root = Path.home() / ".yt-dlp" / "plugins" / "yt_dlp_plugins"
+            
+            if not target_plugin_root.exists():
+                logger.info("🔧 yt-dlp entry_points ignored. Manually linking yt-dlp-ejs to ~/.yt-dlp/plugins/...")
+                shutil.copytree(source_plugin_root, target_plugin_root)
+                logger.info("✅ yt-dlp-ejs successfully linked! YouTube Signature solving fixed.")
+            else:
+                logger.info("✅ yt-dlp-ejs is already linked in ~/.yt-dlp/plugins/.")
+        except ImportError:
+            logger.error("❌ CRITICAL: yt-dlp-ejs is NOT installed in the environment!")
+        except Exception as e:
+            logger.error(f"❌ Failed to link yt-dlp-ejs: {e}")
 
     async def _check_instance_health(self, instance: str, endpoint: str = "/") -> bool:
         try:
@@ -349,7 +374,7 @@ class YouTubeDownloader:
             'retries': 3,
             'retry_sleep_functions': {'http': 10},
             'ignoreerrors': True,
-            # Убираем js_runtimes, чтобы yt-dlp сам нашел node и yt-dlp-ejs
+            # js_runtimes убран, yt-dlp сам найдет node и ~/.yt-dlp/plugins/
         }
         
         cookie_file = None
@@ -374,7 +399,6 @@ class YouTubeDownloader:
 
         youtube_args = {}
         
-        # Используем только стабильные клиенты
         if cookie_file and "YouTube" in source_name:
             youtube_args['player_client'] = ['web']
             if is_valid_token:
