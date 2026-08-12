@@ -3,9 +3,10 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-# 1. Устанавливаем FFmpeg и Node.js 20.x
+# 1. Устанавливаем ffmpeg, build-essential (критично для ytdlp-jsc) и Node.js
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    build-essential \
     curl \
     ca-certificates \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -15,11 +16,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 
-# 2. Устанавливаем зависимости
+# 2. Устанавливаем зависимости (ytdlp-jsc успешно скомпилируется благодаря build-essential)
 RUN pip install --no-cache-dir -r requirements.txt
-
-# 3. ПРИНУДИТЕЛЬНО переустанавливаем yt-dlp-ejs, чтобы он зарегистрировал свои скрипты для yt-dlp
-RUN pip install --no-cache-dir --upgrade --force-reinstall yt-dlp-ejs
 
 COPY . .
 
