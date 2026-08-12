@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 python-telegram-bot
 google-genai>=1.60.0
-yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
+yt-dlp
 yt-dlp-ejs
 aiosqlite
 pydantic
